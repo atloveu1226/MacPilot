@@ -1,0 +1,11 @@
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+apps/desktop/node_modules/
+apps/desktop/dist/
+data/*.sqlite3
+data/*.sqlite3-*
+.DS_Store
