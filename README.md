@@ -1,182 +1,210 @@
 # MacPilot
 
-一个使用 LangChain 和 LangGraph 构建的本地优先 Computer-Use Agent 原型。
+MacPilot is a local-first macOS computer-use agent prototype built with
+LangChain, LangGraph, FastAPI, and Tauri. It turns a natural-language goal
+into an observable, resumable workflow while keeping filesystem, browser, and
+high-risk actions behind explicit policy boundaries.
 
-Phase 2 工作流代码位于 `src/macpilot/phase2/workflow.py`。
+The project focuses on reliability rather than unconstrained autonomy:
 
-## 代码分层
+- structured planning with `Planner → Researcher → Critic → Finalizer`
+- durable SQLite task, step, approval, and audit-event storage
+- LangGraph checkpoints, retry, pause, resume, and cancellation
+- filesystem and browser allowlists with read-only defaults
+- untrusted webpage content and prompt-injection detection
+- human approval gates for high-risk actions
+- 50 deterministic Phase 5 regression tasks and trace-based metrics
+- a Tauri + React desktop application for task execution and review
 
-实现代码按开发阶段拆分，避免所有功能堆在同一个目录：
+## Project structure
 
 ```text
 src/macpilot/
-├── core/                 # 共享基础设施
-│   ├── config.py         # 环境变量和运行配置
-│   ├── models.py         # Task / Step / Approval / Event 类型
-│   ├── storage.py        # SQLite 任务和审计记录
-│   └── checkpoint.py     # LangGraph 持久化 checkpoint
+├── core/
+│   ├── cache.py          # Local SQLite response cache
+│   ├── checkpoint.py     # Durable LangGraph checkpoints
+│   ├── config.py         # Environment-backed runtime settings
+│   ├── context.py        # Context budgets and message trimming
+│   ├── models.py         # Task / Step / Approval / Event contracts
+│   ├── storage.py        # SQLite task and audit storage
+│   └── usage.py          # Token usage and cost estimation
 ├── phase1/
-│   └── filesystem.py     # 文件读取、写入和路径白名单
+│   └── filesystem.py     # Workspace-scoped filesystem tools
 ├── phase2/
 │   └── workflow.py       # Planner / Researcher / Critic / Finalizer
 ├── phase3/
-│   ├── browser.py        # Playwright 和网页内容安全处理
-│   ├── documents.py      # PDF / Word / Excel 解析
-│   ├── resume_profile.py # ResumeProfile 和证据模型
-│   └── security.py       # 浏览器域名白名单
+│   ├── browser.py        # Playwright and webpage safety handling
+│   ├── documents.py      # PDF / Word / Excel extraction
+│   ├── resume_profile.py # Evidence-aware ResumeProfile model
+│   └── security.py       # Browser domain allowlist
 ├── phase5/
-│   ├── metrics.py         # 完成率、恢复率、延迟、成本等指标
-│   └── runner.py          # 50 个离线回归任务和报告生成
-├── core/context.py        # 上下文预算和裁剪
-├── core/cache.py          # SQLite 本地响应缓存
-├── core/usage.py          # Token 使用量和成本估算
-├── api.py                # FastAPI 入口
-└── cli.py                # 命令行入口
+│   ├── metrics.py        # Evaluation and trace metrics
+│   └── runner.py         # Offline regression runner and reports
+├── api.py                # FastAPI application
+└── cli.py                # Interactive command-line client
+
+apps/desktop/             # Tauri + React desktop client
+evals/                    # 50 evaluation task definitions
+docs/                     # Architecture, demo, and release documentation
+tests/                    # Unit and integration tests
 ```
 
-顶层的 `config.py`、`storage.py`、`agent_workflow.py` 等只是兼容导入，真正实现
-分别位于 `core/`、`phase1/`、`phase2/` 和 `phase3/`。
+## Requirements
 
-当前能力：
+- Python 3.12+
+- Optional: Node.js, Rust, and the Tauri CLI for the desktop application
+- A Qwen/DashScope-compatible API key for live model execution
 
-- 只访问 `MACPILOT_WORKSPACE` 指定的目录
-- 列出目录中的文件
-- 读取受支持的文本文件
-- 在 `MACPILOT_READ_ONLY=false` 时写入受支持的文本文件
-- 通过路径解析阻止 `..` 和符号链接越权
-- 将任务、步骤、工具调用、审批和异常持久化到 SQLite
-- 根据文件内容回答问题或生成摘要
-- 使用 LangGraph checkpoint 保留同一会话的消息状态
-- 使用 `Planner → Researcher → Critic → Finalizer` 完成可恢复的研究流程
-- Critic 发现证据不足时自动重试 Researcher 一次
-- 高风险计划会暂停在人工审批节点，可通过 API 恢复
-- 通过域名白名单读取网页，网页内容始终作为不可信数据处理
-- 提取 PDF、Word、Excel 和文本文件，并保留来源文件名
-- 使用带证据和置信度的 `ResumeProfile` 数据结构
-
-## 启动
+## Installation
 
 ```bash
 cp .env.example .env
-# 在 .env 中填写新的 DASHSCOPE_API_KEY
+# Edit .env and set DASHSCOPE_API_KEY for live model execution.
 .venv/bin/pip install -e '.[dev,phase3]'
+```
+
+The default workspace is `data/workspace`. The default mode is read-only, and
+browser access is disabled until domains are explicitly allowlisted.
+
+## Run the agent
+
+Start the interactive CLI:
+
+```bash
 .venv/bin/macpilot
 ```
 
-示例输入：
+Example request:
 
 ```text
-读取所有文件，告诉我这个项目的定位、当前能力和目标用户。
+Read all workspace files and summarize the project's positioning, current capabilities, and target users.
 ```
 
-默认工作目录是 `data/workspace`。第一版只读，不具备写文件、浏览器操作或提交动作。
-
-## FastAPI 服务
-
-启动本地 API：
+Start the local API:
 
 ```bash
 .venv/bin/macpilot-api
 ```
 
-打开 `http://127.0.0.1:8000/docs` 可以查看交互式 API 文档。
+Then open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for the
+interactive API documentation.
 
-当前接口：
+## API endpoints
 
-- `GET /health`：健康检查
-- `POST /tasks`：创建任务
-- `GET /tasks/{task_id}`：查询任务
-- `POST /tasks/{task_id}/messages`：向任务发送一条消息并运行 Agent
-- `GET /tasks/{task_id}/steps`：查询步骤记录
-- `GET /tasks/{task_id}/events`：查询审计事件
-- `GET /tasks/{task_id}/approvals`：查询任务的审批请求
-- `POST /tasks/{task_id}/approvals/{approval_id}`：批准或拒绝审批请求
-- `POST /tasks/{task_id}/resume`：用审批决定恢复暂停的任务
-- `POST /tasks/{task_id}/cancel`：终止未完成任务
-- `GET /metrics`：聚合所有已持久化任务的评测指标
-- `GET /tasks/{task_id}/metrics`：查看单个任务的指标
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `POST` | `/tasks` | Create a task |
+| `GET` | `/tasks/{task_id}` | Inspect task status |
+| `POST` | `/tasks/{task_id}/messages` | Send a message and run the agent |
+| `GET` | `/tasks/{task_id}/steps` | List workflow steps |
+| `GET` | `/tasks/{task_id}/events` | List audit events |
+| `GET` | `/tasks/{task_id}/approvals` | List approval requests |
+| `POST` | `/tasks/{task_id}/approvals/{approval_id}` | Approve or reject an action |
+| `POST` | `/tasks/{task_id}/resume` | Resume a paused task |
+| `POST` | `/tasks/{task_id}/cancel` | Cancel an unfinished task |
+| `GET` | `/metrics` | Aggregate all persisted task metrics |
+| `GET` | `/tasks/{task_id}/metrics` | Inspect metrics for one task |
 
-Phase 2 的一次任务会依次经过 Planner、Researcher、Critic 和 Finalizer；
-每个节点都会写入步骤和事件。模型调用超时默认为 120 秒，可在 `.env` 中通过
-`MACPILOT_AGENT_TIMEOUT_SECONDS` 调整。
-
-示例：
+Example:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/tasks \
   -H 'Content-Type: application/json' \
-  -d '{"user_goal":"总结本地项目资料"}'
+  -d '{"user_goal":"Summarize the local project files"}'
 ```
 
-创建任务后，把返回的 `id` 用于发送消息：
+Use the returned task ID to send a message:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/tasks/TASK_ID/messages \
   -H 'Content-Type: application/json' \
-  -d '{"content":"读取所有文件并生成摘要"}'
+  -d '{"content":"Read all files and produce a concise summary"}'
 ```
 
-任务记录默认保存在 `data/macpilot.sqlite3`。每次工具调用都会写入事件表，
-方便在后续 API、时间线和评测功能中复用。写入能力默认关闭，打开前应确认工作目录
-是专门给 MacPilot 使用的目录。
+Every tool call, model usage record, approval, error, and assistant response is
+stored in `data/macpilot.sqlite3`. The database is local-only by default.
 
-安全配置：API Key 只从 `DASHSCOPE_API_KEY` 环境变量读取，不应写入源码或提交到仓库。
-如果旧版本的 Key 曾经暴露，应在 DashScope 控制台撤销并重新生成。
+## Security model
 
-Phase 3 浏览器配置默认关闭。只有配置白名单域名后，Researcher 才能读取网页：
+- `MACPILOT_WORKSPACE` is the only filesystem root available to tools.
+- Path traversal and symlink escapes are rejected.
+- Writes are disabled unless `MACPILOT_READ_ONLY=false` is explicitly set.
+- Browser access requires an explicit domain allowlist:
 
-```env
-MACPILOT_ALLOWED_BROWSER_DOMAINS=example.com,wikipedia.org
-```
+  ```env
+  MACPILOT_ALLOWED_BROWSER_DOMAINS=example.com,wikipedia.org
+  ```
 
-浏览器工具当前是只读的，不会提交表单、上传文件或发送消息。首次使用 Playwright
-时，如果本机没有 Chromium 运行时，可以执行：
+- Browser tools are read-only and do not submit forms, upload files, or send
+  messages.
+- Webpage text is treated as untrusted data. Instruction-like content is
+  surfaced as a prompt-injection warning and cannot change system policy.
+- High-risk plans pause in `waiting_approval` before execution.
+- API keys are read from environment variables and must never be committed.
+
+If Chromium is not installed for Playwright:
 
 ```bash
 .venv/bin/playwright install chromium
 ```
 
-## 测试
+## Phase 5 evaluation and optimization
+
+Evaluation tasks are defined in `evals/tasks.json`: 10 local-file tasks, 15
+web-research tasks, 10 document tasks, 8 failure-recovery tasks, and 7
+security tasks.
+
+The default evaluation is deterministic and offline. It does not make network
+requests or require an API key:
+
+```bash
+.venv/bin/macpilot-evals --output data/evals/latest.json
+# Or run one category:
+.venv/bin/python evals/run_evals.py --category security
+```
+
+The command writes both JSON and Markdown reports. The offline report is a
+policy/tool regression report, not a claim of live end-to-end model
+performance. To aggregate real task traces from SQLite as well:
+
+```bash
+.venv/bin/macpilot-evals \
+  --database data/macpilot.sqlite3 \
+  --output data/evals/latest.json
+```
+
+Reports include task success rate, average steps, tool calls, recovery rate,
+unauthorized actions, prompt-injection detection, citation correctness, token
+usage, estimated cost, and cache hit rate. Cost estimates default to zero and
+are only enabled when per-million-token prices are configured in `.env`.
+
+Phase 5 also enables a local SQLite response cache and context budgeting by
+default. Cache hits never bypass tools, approvals, or policy checks. Tune them
+with:
+
+```env
+MACPILOT_CONTEXT_MAX_TOKENS=12000
+MACPILOT_CACHE_ENABLED=true
+MACPILOT_CACHE_TTL_SECONDS=86400
+```
+
+The latest generated report is available at:
+
+- `data/evals/latest.json`
+- `data/evals/latest.md`
+
+## Tests
 
 ```bash
 .venv/bin/pytest
 ```
 
-## Phase 5 评测与优化
+## Desktop application
 
-评测任务定义在 `evals/tasks.json`，共 50 个任务：本地文件 10 个、网页研究 15 个、
-文档生成 10 个、失败恢复 8 个、安全 7 个。默认评测是离线、确定性的策略和工具回归，
-不会联网，也不需要 API Key：
-
-```bash
-.venv/bin/macpilot-evals --output data/evals/latest.json
-# 或
-.venv/bin/python evals/run_evals.py --category security
-```
-
-命令同时生成 JSON 和 Markdown 报告。它不会把离线回归结果冒充真实端到端成绩；真实任务
-完成后，可以把 SQLite 事件流纳入同一份报告：
-
-```bash
-.venv/bin/macpilot-evals --database data/macpilot.sqlite3 \
-  --output data/evals/latest.json
-```
-
-报告包含任务完成率、平均步骤数、工具调用数、恢复率、未授权操作数、Prompt Injection
-检测率、引用正确率、Token 数、估算成本和缓存命中率。成本默认是 0，只有在 `.env` 中
-填写对应模型的每百万 Token 价格后才会估算，不会把估算值当作账单金额。
-
-Phase 5 默认启用 SQLite 响应缓存和上下文预算。缓存只作用于模型响应，工具调用和审批
-仍然每次执行；`MACPILOT_CONTEXT_MAX_TOKENS`、`MACPILOT_CACHE_ENABLED` 和
-`MACPILOT_CACHE_TTL_SECONDS` 可调整行为。
-
-架构说明和 3 分钟 Demo 讲稿位于 `docs/architecture.md` 和 `docs/demo-script.md`；
-发布前检查清单位于 `docs/release-checklist.md`。
-
-## Phase 4 桌面端
-
-Tauri + React 桌面端位于 `apps/desktop`，包含任务输入、时间线、审批弹窗、结果预览、
-任务终止和菜单栏托盘入口。桌面端默认连接本地 FastAPI：
+The Tauri + React desktop client is located in `apps/desktop`. It provides
+task input, a workflow timeline, approval dialogs, result preview, task
+cancellation, and a macOS tray entry point.
 
 ```bash
 cd apps/desktop
@@ -184,5 +212,12 @@ npm install
 npm run tauri dev
 ```
 
-当前 Python 环境没有 Node.js、Rust 和 Tauri CLI，因此暂时只能完成工程代码和后端验证；
-安装桌面端构建依赖后即可编译 macOS 应用。
+The desktop client connects to the local FastAPI server at
+`http://127.0.0.1:8000` by default.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [3-minute demo script](docs/demo-script.md)
+- [Release checklist](docs/release-checklist.md)
+- [Project plan](plan.md)
