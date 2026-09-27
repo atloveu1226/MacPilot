@@ -20,6 +20,8 @@ class Settings:
     agent_timeout_seconds: float = 120.0
     allowed_browser_domains: tuple[str, ...] = ()
     browser_timeout_ms: int = 30_000
+    browser_headless: bool = True
+    browser_session_dir: Path = Path("./data/browser-sessions")
     model_name: str = "qwen3.7-plus"
     api_key: str | None = None
     base_url: str = "https://ws-0d9k5ksti6cnsfmd.cn-hongkong.maas.aliyuncs.com/compatible-mode/v1"
@@ -42,6 +44,14 @@ class Settings:
             if domain.strip()
         )
         browser_timeout_ms = int(os.getenv("MACPILOT_BROWSER_TIMEOUT_MS", "30000"))
+        browser_headless = os.getenv("MACPILOT_BROWSER_HEADLESS", "true").lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+        browser_session_dir = Path(
+            os.getenv("MACPILOT_BROWSER_SESSION_DIR", "./data/browser-sessions")
+        )
         model_name = os.getenv("QWEN_MODEL", "qwen3.7-plus")
         api_key = os.getenv("DASHSCOPE_API_KEY")
         workspace_id = os.getenv("QWEN_WORKSPACE_ID")
@@ -76,6 +86,8 @@ class Settings:
             agent_timeout_seconds=agent_timeout_seconds,
             allowed_browser_domains=allowed_browser_domains,
             browser_timeout_ms=browser_timeout_ms,
+            browser_headless=browser_headless,
+            browser_session_dir=browser_session_dir,
             model_name=model_name,
             api_key=api_key,
             base_url=base_url,

@@ -23,7 +23,7 @@
       }
     ],
     "trayIcon": {
-      "iconPath": "icons/tray.svg",
+      "iconPath": "icons/icon.png",
       "iconAsTemplate": true,
       "menuOnLeftClick": false
     }
@@ -31,6 +31,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/tray.svg"]
+    "icon": ["icons/icon.png"]
   }
 }

@@ -97,6 +97,8 @@ interactive API documentation.
 | `POST` | `/tasks` | Create a task |
 | `GET` | `/tasks/{task_id}` | Inspect task status |
 | `POST` | `/tasks/{task_id}/messages` | Send a message and run the agent |
+| `GET` | `/tasks/{task_id}/files` | List files uploaded to the task workspace |
+| `POST` | `/tasks/{task_id}/files` | Upload a task-local source document |
 | `GET` | `/tasks/{task_id}/steps` | List workflow steps |
 | `GET` | `/tasks/{task_id}/events` | List audit events |
 | `GET` | `/tasks/{task_id}/approvals` | List approval requests |
@@ -125,6 +127,13 @@ curl -X POST http://127.0.0.1:8000/tasks/TASK_ID/messages \
 Every tool call, model usage record, approval, error, and assistant response is
 stored in `data/macpilot.sqlite3`. The database is local-only by default.
 
+The desktop client also accepts PDF, Word, Excel, Markdown, TXT, CSV, JSON, and
+YAML files by drag-and-drop or file selection. Uploaded files are saved under
+`data/workspace/uploads/<task_id>/`, are limited by `MACPILOT_MAX_FILE_BYTES`,
+and are passed to the agent as task-local source files. Uploading is an explicit
+user input action; it does not enable agent-initiated writes while the workspace
+remains in the default read-only mode.
+
 ## Security model
 
 - `MACPILOT_WORKSPACE` is the only filesystem root available to tools.
@@ -136,8 +145,15 @@ stored in `data/macpilot.sqlite3`. The database is local-only by default.
   MACPILOT_ALLOWED_BROWSER_DOMAINS=example.com,wikipedia.org
   ```
 
-- Browser tools are read-only and do not submit forms, upload files, or send
-  messages.
+- Browser research is restricted to allowlisted domains. The interactive
+  browser can open pages, inspect fields, and fill a non-submitted form draft;
+  it does not submit forms, upload files, or send messages.
+- Browser sessions use a task-local persistent profile. Set
+  `MACPILOT_BROWSER_HEADLESS=false` when a visible browser window is needed.
+- Form submission is available only for an explicit submission goal after the
+  task reaches `waiting_approval` and the matching approval is accepted. The
+  executor requires exactly one enabled submit button; ambiguous pages are
+  left unchanged.
 - Webpage text is treated as untrusted data. Instruction-like content is
   surfaced as a prompt-injection warning and cannot change system policy.
 - High-risk plans pause in `waiting_approval` before execution.

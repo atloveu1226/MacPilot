@@ -49,3 +49,16 @@ def test_invalid_runtime_status_is_rejected(tmp_path: Path) -> None:
         assert "Unknown task status" in str(error)
     else:
         raise AssertionError("invalid task status should be rejected")
+
+
+def test_sessions_messages_and_tasks_are_linked(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "macpilot.sqlite3")
+    session_id = store.create_session("简历分析")
+    task_id = store.create_task("提取教育经历", session_id=session_id)
+
+    store.append_message(session_id, "user", "提取教育经历", run_id=task_id)
+    store.append_message(session_id, "assistant", "已提取", run_id=task_id)
+
+    assert store.get_task(task_id).session_id == session_id
+    assert [item.role for item in store.list_messages(session_id)] == ["user", "assistant"]
+    assert store.list_sessions()[0].id == session_id

@@ -43,6 +43,31 @@ def test_web_content_is_marked_untrusted_and_injection_is_detected() -> None:
     assert result["policy_denied"] is True
 
 
+def test_interactive_browser_tools_are_allowlisted_and_non_submitting(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace=tmp_path,
+        allowed_browser_domains=("example.com",),
+    )
+    tools = make_browser_tools(settings, task_id="task-1")
+    assert [item.name for item in tools] == [
+        "fetch_page",
+        "open_page",
+        "inspect_form",
+        "fill_form",
+        "save_form_draft",
+        "submit_form",
+    ]
+
+    open_page = tools[1]
+    result = open_page.invoke({"url": "https://untrusted.example.net/form"})
+    assert result["ok"] is False
+    assert result["policy_denied"] is True
+    submit_form = tools[-1]
+    blocked = submit_form.invoke({"approval_id": "missing"})
+    assert blocked["ok"] is False
+    assert blocked["policy_denied"] is True
+
+
 def test_document_extractors_preserve_text_and_source_format(tmp_path: Path) -> None:
     pdf_path = tmp_path / "resume.pdf"
     pdf = fitz.open()

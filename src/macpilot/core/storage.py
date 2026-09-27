@@ -28,11 +28,32 @@ def _json(value: Any) -> str:
 @dataclass(frozen=True)
 class TaskRecord:
     id: str
+    session_id: str
     user_goal: str
     status: str
     plan: Any
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class SessionRecord:
+    id: str
+    title: str
+    status: str
+    created_at: str
+    updated_at: str
+    archived_at: str | None = None
+
+
+@dataclass(frozen=True)
+class MessageRecord:
+    id: str
+    session_id: str
+    role: str
+    content: str
+    created_at: str
+    run_id: str | None = None
 
 
 class SQLiteStore:
@@ -55,11 +76,28 @@ class SQLiteStore:
                 """
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY,
+                    session_id TEXT,
                     user_goal TEXT NOT NULL,
                     status TEXT NOT NULL,
                     plan_json TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    archived_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS messages (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES sessions(id),
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    run_id TEXT
                 );
                 CREATE TABLE IF NOT EXISTS steps (
                     id TEXT PRIMARY KEY,
@@ -94,18 +132,106 @@ class SQLiteStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_steps_task ON steps(task_id, started_at);
+                CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at);
+                CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(tasks)")
+            }
+            if "session_id" not in columns:
+                connection.execute("ALTER TABLE tasks ADD COLUMN session_id TEXT")
+            legacy_tasks = connection.execute(
+                "SELECT id, user_goal, created_at, updated_at, session_id FROM tasks"
+            ).fetchall()
+            for row in legacy_tasks:
+                session_id = row["session_id"] or row["id"]
+                connection.execute(
+                    """INSERT OR IGNORE INTO sessions
+                       (id, title, status, created_at, updated_at)
+                       VALUES (?, ?, 'active', ?, ?)""",
+                    (session_id, row["user_goal"][:80], row["created_at"], row["updated_at"]),
+                )
+                connection.execute(
+                    "UPDATE tasks SET session_id = ? WHERE id = ?",
+                    (session_id, row["id"]),
+                )
             connection.commit()
 
-    def create_task(self, user_goal: str, plan: Any = None, task_id: str | None = None) -> str:
-        task_id = task_id or str(uuid.uuid4())
+    def create_session(self, title: str = "新会话", session_id: str | None = None) -> str:
+        session_id = session_id or str(uuid.uuid4())
         timestamp = _now()
         with closing(self._connection()) as connection:
             connection.execute(
-                "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?)",
-                (task_id, user_goal, "pending", _json(plan) if plan is not None else None,
-                 timestamp, timestamp),
+                """INSERT INTO sessions(id, title, status, created_at, updated_at)
+                   VALUES (?, ?, 'active', ?, ?)""",
+                (session_id, title.strip()[:120] or "新会话", timestamp, timestamp),
+            )
+            connection.commit()
+        return session_id
+
+    def get_session(self, session_id: str) -> SessionRecord | None:
+        with closing(self._connection()) as connection:
+            row = connection.execute(
+                "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return SessionRecord(
+            id=row["id"], title=row["title"], status=row["status"],
+            created_at=row["created_at"], updated_at=row["updated_at"],
+            archived_at=row["archived_at"],
+        )
+
+    def list_sessions(self, include_archived: bool = False) -> list[SessionRecord]:
+        query = "SELECT * FROM sessions"
+        if not include_archived:
+            query += " WHERE archived_at IS NULL"
+        query += " ORDER BY updated_at DESC, id DESC"
+        with closing(self._connection()) as connection:
+            rows = connection.execute(query).fetchall()
+        return [
+            SessionRecord(
+                id=row["id"], title=row["title"], status=row["status"],
+                created_at=row["created_at"], updated_at=row["updated_at"],
+                archived_at=row["archived_at"],
+            )
+            for row in rows
+        ]
+
+    def touch_session(self, session_id: str, title: str | None = None) -> None:
+        assignments = ["updated_at = ?"]
+        values: list[Any] = [_now()]
+        if title is not None:
+            assignments.append("title = ?")
+            values.append(title.strip()[:120] or "新会话")
+        values.append(session_id)
+        with closing(self._connection()) as connection:
+            connection.execute(
+                f"UPDATE sessions SET {', '.join(assignments)} WHERE id = ?", values
+            )
+            connection.commit()
+
+    def create_task(
+        self,
+        user_goal: str,
+        plan: Any = None,
+        task_id: str | None = None,
+        session_id: str | None = None,
+    ) -> str:
+        task_id = task_id or str(uuid.uuid4())
+        session_id = session_id or task_id
+        if self.get_session(session_id) is None:
+            self.create_session(user_goal[:80], session_id=session_id)
+        timestamp = _now()
+        with closing(self._connection()) as connection:
+            connection.execute(
+                """INSERT INTO tasks
+                   (id, session_id, user_goal, status, plan_json, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (task_id, session_id, user_goal, "pending",
+                 _json(plan) if plan is not None else None, timestamp, timestamp),
             )
             connection.commit()
         return task_id
@@ -119,6 +245,7 @@ class SQLiteStore:
             return None
         return TaskRecord(
             id=row["id"],
+            session_id=row["session_id"] or row["id"],
             user_goal=row["user_goal"],
             status=row["status"],
             plan=json.loads(row["plan_json"]) if row["plan_json"] else None,
@@ -139,6 +266,7 @@ class SQLiteStore:
         return [
             TaskRecord(
                 id=row["id"],
+                session_id=row["session_id"] or row["id"],
                 user_goal=row["user_goal"],
                 status=row["status"],
                 plan=json.loads(row["plan_json"]) if row["plan_json"] else None,
@@ -147,6 +275,22 @@ class SQLiteStore:
             )
             for row in rows
         ]
+
+    def get_session_task(self, session_id: str) -> TaskRecord | None:
+        with closing(self._connection()) as connection:
+            row = connection.execute(
+                """SELECT * FROM tasks WHERE session_id = ?
+                   ORDER BY updated_at DESC, id DESC LIMIT 1""",
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return TaskRecord(
+            id=row["id"], session_id=row["session_id"] or row["id"],
+            user_goal=row["user_goal"], status=row["status"],
+            plan=json.loads(row["plan_json"]) if row["plan_json"] else None,
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )
 
     def update_task_status(self, task_id: str, status: TaskStatus) -> None:
         if status not in {
@@ -164,6 +308,132 @@ class SQLiteStore:
                 (status, _now(), task_id),
             )
             connection.commit()
+
+    def append_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        run_id: str | None = None,
+    ) -> str:
+        message_id = str(uuid.uuid4())
+        with closing(self._connection()) as connection:
+            connection.execute(
+                """INSERT INTO messages(id, session_id, role, content, created_at, run_id)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (message_id, session_id, role, content, _now(), run_id),
+            )
+            current = connection.execute(
+                "SELECT title FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            title = current["title"] if current else "新会话"
+            if role == "user" and title == "新会话":
+                title = content.strip()[:40] or "新会话"
+            connection.execute(
+                "UPDATE sessions SET updated_at = ?, title = ? WHERE id = ?",
+                (_now(), title, session_id),
+            )
+            connection.commit()
+        return message_id
+
+    def list_messages(self, session_id: str, limit: int = 100) -> list[MessageRecord]:
+        with closing(self._connection()) as connection:
+            rows = connection.execute(
+                """SELECT * FROM messages WHERE session_id = ?
+                   ORDER BY created_at, id LIMIT ?""",
+                (session_id, max(1, min(limit, 500))),
+            ).fetchall()
+        return [
+            MessageRecord(
+                id=row["id"], session_id=row["session_id"], role=row["role"],
+                content=row["content"], created_at=row["created_at"], run_id=row["run_id"],
+            )
+            for row in rows
+        ]
+
+    def delete_session(self, session_id: str) -> dict[str, int]:
+        """Delete a session and all local records scoped to it."""
+        with closing(self._connection()) as connection:
+            session = connection.execute(
+                "SELECT id FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if session is None:
+                raise KeyError(f"Session not found: {session_id}")
+            task_rows = connection.execute(
+                "SELECT id FROM tasks WHERE session_id = ?", (session_id,)
+            ).fetchall()
+            task_ids = [row["id"] for row in task_rows]
+            counts = {"tasks": len(task_ids), "messages": 0, "files_indexed": 0}
+
+            counts["messages"] = connection.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?", (session_id,)
+            ).fetchone()[0]
+            connection.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+
+            if task_ids:
+                placeholders = ",".join("?" for _ in task_ids)
+                connection.execute(
+                    f"DELETE FROM approvals WHERE task_id IN ({placeholders})", task_ids
+                )
+                connection.execute(
+                    f"DELETE FROM events WHERE task_id IN ({placeholders})", task_ids
+                )
+                connection.execute(
+                    f"DELETE FROM steps WHERE task_id IN ({placeholders})", task_ids
+                )
+                for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
+                    exists = connection.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                        (table,),
+                    ).fetchone()
+                    if exists:
+                        columns = {
+                            row["name"]
+                            for row in connection.execute(f"PRAGMA table_info({table})")
+                        }
+                        if "thread_id" in columns:
+                            connection.execute(
+                                f"DELETE FROM {table} WHERE thread_id IN ({placeholders})",
+                                task_ids,
+                            )
+                connection.execute(
+                    f"DELETE FROM tasks WHERE id IN ({placeholders})", task_ids
+                )
+
+            knowledge_table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'knowledge_documents'"
+            ).fetchone()
+            docs: list[sqlite3.Row] = []
+            if knowledge_table:
+                knowledge_columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(knowledge_documents)")
+                }
+                if "session_id" in knowledge_columns:
+                    docs = connection.execute(
+                        "SELECT path FROM knowledge_documents WHERE session_id = ?",
+                        (session_id,),
+                    ).fetchall()
+                else:
+                    docs = connection.execute(
+                        """SELECT path FROM knowledge_documents
+                           WHERE path = ? OR path LIKE ?""",
+                        (f"uploads/{session_id}", f"uploads/{session_id}/%"),
+                    ).fetchall()
+            paths = [row["path"] for row in docs]
+            counts["files_indexed"] = len(paths)
+            if paths:
+                placeholders = ",".join("?" for _ in paths)
+                connection.execute(
+                    f"DELETE FROM knowledge_chunks WHERE path IN ({placeholders})",
+                    paths,
+                )
+                connection.execute(
+                    "DELETE FROM knowledge_documents WHERE session_id = ?", (session_id,)
+                )
+            connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            connection.commit()
+            return counts
 
     def create_step(
         self,

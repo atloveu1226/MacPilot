@@ -7,10 +7,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from macpilot.core.skills import load_skill
+
 
 class Evidence(BaseModel):
     field: str
+    value: Any | None = None
     source: str
+    location: str | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str | None = None
 
@@ -21,6 +25,10 @@ class Basics(BaseModel):
     phone: str | None = None
     location: str | None = None
     summary: str | None = None
+    target_role: str | None = None
+    nationality: str | None = None
+    work_authorization: str | None = None
+    links: list[str] = Field(default_factory=list)
 
 
 class EducationEntry(BaseModel):
@@ -42,9 +50,13 @@ class ExperienceEntry(BaseModel):
 
 class ProjectEntry(BaseModel):
     name: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    role: str | None = None
     description: str | None = None
     technologies: list[str] = Field(default_factory=list)
     url: str | None = None
+    outcomes: list[str] = Field(default_factory=list)
 
 
 class ResumeProfile(BaseModel):
@@ -64,11 +76,15 @@ class ResumeProfile(BaseModel):
         return self
 
 
-RESUME_EXTRACTION_PROMPT = """Extract a ResumeProfile from the supplied documents.
+RESUME_EXTRACTION_PROMPT = f"""Extract a ResumeProfile from the supplied documents.
 Only include facts supported by the source text. Do not invent employers,
 dates, achievements, scores, certificates, or skill levels. For every
 populated field, add an evidence item with the source file and confidence.
 Return JSON matching the ResumeProfile schema.
+
+You must follow this project skill exactly:
+
+{load_skill("readcv")}
 """
 
 

@@ -7,6 +7,7 @@ from langgraph.types import Command
 
 from macpilot.api import create_app
 from macpilot.core.config import Settings
+from macpilot.phase3.knowledge import KnowledgeIndex
 
 
 class FakeAgent:
@@ -142,3 +143,73 @@ def test_metrics_api_aggregates_persisted_task_trace(tmp_path: Path) -> None:
     task_metrics = client.get(f"/tasks/{task_id}/metrics")
     assert task_metrics.status_code == 200
     assert task_metrics.json()["task_count"] == 1
+
+
+def test_task_api_uploads_and_lists_workspace_file(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace=tmp_path / "workspace",
+        database_path=tmp_path / "macpilot.sqlite3",
+        max_file_bytes=100,
+    )
+    client = TestClient(create_app(settings))
+    task_id = client.post("/tasks", json={"user_goal": "读取上传文件"}).json()["id"]
+
+    response = client.post(
+        f"/tasks/{task_id}/files",
+        files={"file": ("profile.md", b"name: Candidate", "text/markdown")},
+    )
+
+    assert response.status_code == 201
+    uploaded = response.json()
+    assert uploaded["name"] == "profile.md"
+    assert uploaded["path"] == f"uploads/{task_id}/profile.md"
+    assert (settings.workspace / uploaded["path"]).read_text() == "name: Candidate"
+    assert client.get(f"/tasks/{task_id}/files").json()[0]["path"] == uploaded["path"]
+    assert client.get(f"/tasks/{task_id}/events").json()[-1]["event_type"] == "file_uploaded"
+
+
+def test_task_api_rejects_unsupported_or_oversized_upload(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace=tmp_path / "workspace",
+        database_path=tmp_path / "macpilot.sqlite3",
+        max_file_bytes=10,
+    )
+    client = TestClient(create_app(settings))
+    task_id = client.post("/tasks", json={"user_goal": "上传资料"}).json()["id"]
+
+    unsupported = client.post(
+        f"/tasks/{task_id}/files",
+        files={"file": ("malware.exe", b"123", "application/octet-stream")},
+    )
+    oversized = client.post(
+        f"/tasks/{task_id}/files",
+        files={"file": ("large.txt", b"01234567890", "text/plain")},
+    )
+
+    assert unsupported.status_code == 415
+    assert oversized.status_code == 413
+
+
+def test_delete_session_removes_uploads_and_rag_index(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace=tmp_path / "workspace",
+        database_path=tmp_path / "macpilot.sqlite3",
+    )
+    client = TestClient(create_app(settings))
+    session = client.post("/sessions", json={"title": "待删除会话"}).json()
+    task = client.post(
+        "/tasks",
+        json={"user_goal": "读取资料", "session_id": session["id"]},
+    ).json()
+    uploaded = client.post(
+        f"/tasks/{task['id']}/files",
+        files={"file": ("private.txt", b"private session evidence", "text/plain")},
+    ).json()
+    KnowledgeIndex(settings).search("private evidence", session_id=session["id"])
+
+    deleted = client.delete(f"/sessions/{session['id']}")
+
+    assert deleted.status_code == 200
+    assert client.get(f"/sessions/{session['id']}").status_code == 404
+    assert not (settings.workspace / uploaded["path"]).exists()
+    assert client.app.state.store.list_messages(session["id"]) == []
