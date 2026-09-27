@@ -63,7 +63,7 @@ def test_interactive_browser_tools_are_allowlisted_and_non_submitting(tmp_path: 
     result = open_page.invoke({"url": "https://untrusted.example.net/form"})
     assert result["ok"] is False
     assert result["policy_denied"] is True
-    submit_form = tools[-1]
+    submit_form = next(item for item in tools if item.name == "submit_form")
     blocked = submit_form.invoke({"approval_id": "missing"})
     assert blocked["ok"] is False
     assert blocked["policy_denied"] is True
