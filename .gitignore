@@ -8,4 +8,7 @@ apps/desktop/node_modules/
 apps/desktop/dist/
 data/*.sqlite3
 data/*.sqlite3-*
+data/workspace/uploads/
+data/browser-sessions/
+data/workspace/browser-drafts/
 .DS_Store

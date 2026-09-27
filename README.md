@@ -157,6 +157,11 @@ remains in the default read-only mode.
 - Webpage text is treated as untrusted data. Instruction-like content is
   surfaced as a prompt-injection warning and cannot change system policy.
 - High-risk plans pause in `waiting_approval` before execution.
+- Approval routing is enforced by a deterministic policy layer. Model plans
+  may add an approval requirement, but cannot downgrade known high-risk tools
+  such as form submission, deletion, command execution, or message sending.
+- Task-local uploads, browser profiles, and browser drafts are runtime data and
+  are excluded from version control.
 - API keys are read from environment variables and must never be committed.
 
 If Chromium is not installed for Playwright:

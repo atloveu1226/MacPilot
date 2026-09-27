@@ -56,6 +56,7 @@ def test_interactive_browser_tools_are_allowlisted_and_non_submitting(tmp_path: 
         "fill_form",
         "save_form_draft",
         "submit_form",
+        "close_browser",
     ]
 
     open_page = tools[1]

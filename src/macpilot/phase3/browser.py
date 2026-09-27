@@ -138,6 +138,23 @@ def make_browser_tools(
         return context
 
     @tool
+    def close_browser() -> dict[str, Any]:
+        """Close the task-local browser session and release its resources."""
+        context = browser_state.pop("context", None)
+        playwright = browser_state.pop("playwright", None)
+        browser_state["page"] = None
+        browser_state["fields"] = {}
+        try:
+            if context is not None:
+                context.close()
+        except Exception as error:
+            return result("close_browser", {}, {"ok": False, "error": str(error)})
+        finally:
+            if playwright is not None:
+                playwright.stop()
+        return result("close_browser", {}, {"ok": True, "message": "浏览器会话已关闭。"})
+
+    @tool
     def open_page(url: str) -> dict[str, Any]:
         """Open an allowlisted webpage in a persistent user browser session."""
         try:
@@ -355,4 +372,4 @@ def make_browser_tools(
                 "ok": False, "error": f"Form submission failed: {error}",
             })
 
-    return [fetch_page, open_page, inspect_form, fill_form, save_form_draft, submit_form]
+    return [fetch_page, open_page, inspect_form, fill_form, save_form_draft, submit_form, close_browser]

@@ -21,6 +21,7 @@ from langgraph.types import interrupt
 from macpilot.core.config import Settings
 from macpilot.core.cache import ResponseCache, make_cache_key
 from macpilot.core.context import trim_text
+from macpilot.core.policy import requires_approval, risk_action
 from macpilot.core.skills import load_skill
 from macpilot.core.usage import record_model_usage
 from macpilot.phase1.filesystem import make_filesystem_tools
@@ -364,8 +365,8 @@ def build_agent_workflow(
         plan = state.get("plan", {})
         preview = {
             "plan": plan,
-            "action": "submit_form" if _is_form_submission_goal(state.get("user_goal", "")) else "external_action",
-            "warning": "批准后可能产生不可逆的外部操作" if _is_form_submission_goal(state.get("user_goal", "")) else None,
+            "action": risk_action(state.get("user_goal", ""), plan),
+            "warning": "批准后可能产生不可逆的外部操作",
         }
         approval_id = audit_store.create_approval(
             task_id,
@@ -463,6 +464,9 @@ def build_agent_workflow(
                         ensure_ascii=False,
                         indent=2,
                     )
+        close_tool = next((item for item in tools if item.name == "close_browser"), None)
+        if close_tool is not None:
+            close_tool.invoke({})
         _record_node_finish(
             audit_store,
             task_id,
@@ -481,7 +485,7 @@ def build_agent_workflow(
             and state.get("retry_count", 0) <= MAX_RESEARCH_RETRIES
         ):
             return "researcher"
-        if state.get("plan", {}).get("requires_approval"):
+        if requires_approval(state.get("user_goal", ""), state.get("plan", {})):
             return "request_approval"
         return "finalizer"
 
