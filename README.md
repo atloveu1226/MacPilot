@@ -59,7 +59,7 @@ docs/                         # 架构与演示文档
 ## 安装
 
 ```bash
-cd /Users/alan/Desktop/agent
+cd MacPilot
 source .venv/bin/activate
 .venv/bin/pip install -e '.[dev,phase3]'
 
@@ -85,7 +85,7 @@ MACPILOT_READ_ONLY=true
 终端一：
 
 ```bash
-cd /Users/alan/Desktop/agent
+cd MacPilot
 source .venv/bin/activate
 .venv/bin/macpilot-api
 ```
@@ -95,7 +95,7 @@ source .venv/bin/activate
 终端二：
 
 ```bash
-cd /Users/alan/Desktop/agent/apps/desktop
+cd MacPilot/apps/desktop
 npm run dev
 ```
 
