@@ -6,7 +6,7 @@ from openpyxl import Workbook
 
 from macpilot.core.config import Settings
 from macpilot.phase3.browser import detect_prompt_injection, make_browser_tools
-from macpilot.phase3.documents import extract_document, make_document_tools
+from macpilot.phase3.documents import _join_pdf_spans, extract_document, make_document_tools
 from macpilot.phase3.resume_profile import parse_resume_profile
 from macpilot.phase3.security import (
     BrowserPolicyError,
@@ -15,13 +15,18 @@ from macpilot.phase3.security import (
 )
 
 
-def test_browser_allowlist_accepts_subdomains_but_not_similar_domains() -> None:
-    assert is_allowed_domain("jobs.example.com", ("example.com",))
+def test_browser_allowlist_accepts_only_exact_domains() -> None:
+    assert is_allowed_domain("example.com", ("example.com",))
+    assert not is_allowed_domain("jobs.example.com", ("example.com",))
     assert not is_allowed_domain("example.com.attacker.test", ("example.com",))
 
-    assert validate_browser_url(
-        "https://jobs.example.com/form", ("example.com",)
-    ) == "https://jobs.example.com/form"
+    assert validate_browser_url("https://example.com/form", ("example.com",)) == "https://example.com/form"
+    try:
+        validate_browser_url("http://example.com/form", ("example.com",))
+    except BrowserPolicyError as error:
+        assert "HTTPS" in str(error)
+    else:
+        raise AssertionError("insecure HTTP URL should be denied")
     try:
         validate_browser_url("https://example.com.attacker.test", ("example.com",))
     except BrowserPolicyError as error:
@@ -53,6 +58,7 @@ def test_interactive_browser_tools_are_allowlisted_and_non_submitting(tmp_path: 
         "fetch_page",
         "open_page",
         "inspect_form",
+        "request_domain_access",
         "fill_form",
         "save_form_draft",
         "submit_form",
@@ -98,6 +104,24 @@ def test_document_extractors_preserve_text_and_source_format(tmp_path: Path) -> 
     assert result["ok"] is True
     assert result["source"] == "education.docx"
     assert result["format"] == "docx"
+
+
+def test_pdf_extractor_preserves_visual_lines_and_cjk_spacing(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "layout-resume.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "Imperial College, UK")
+    page.insert_text((72, 92), "Statistics MSc (Data Science)")
+    page.insert_text((72, 112), "2025.09-2026.11")
+    pdf.save(pdf_path)
+    pdf.close()
+
+    content = extract_document(pdf_path, 200_000)
+    assert "Imperial College, UK" in content
+    assert "Statistics MSc (Data Science)" in content
+    assert "2025.09-2026.11" in content
+    assert "Imperial College, UKStatistics" not in content
+    assert _join_pdf_spans([{"text": "帝国理工学院"}, {"text": "，英国"}]) == "帝国理工学院，英国"
 
 
 def test_resume_profile_requires_evidence_sources() -> None:

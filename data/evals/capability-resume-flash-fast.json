@@ -1,0 +1,47 @@
+{
+  "generated_at": "2026-09-29T14:54:36.135725+00:00",
+  "database": "/var/folders/vy/bsgsljp11x7g8v5cmvnjhj4w0000gn/T/macpilot-capability-1uu8hnmm.sqlite3",
+  "records": [
+    {
+      "dimensions": {
+        "completion": 4,
+        "tool_use": 0,
+        "evidence": 0,
+        "safety": 4,
+        "recovery": null
+      },
+      "score": 50.0,
+      "model_calls": 2,
+      "input_tokens": 5602,
+      "output_tokens": 8141,
+      "tool_calls": 0,
+      "tool_names": [],
+      "source_paths": [],
+      "response": "{\"error\": \"Resume extraction did not match the readcv schema\", \"details\": \"13 validation errors for ResumeProfile\\neducation.0.details\\n  Input should be a valid string [type=string_type, input_value=[], input_type=list]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\neducation.1.details\\n  Input should be a valid string [type=string_type, input_value=['First Class Honours (Top 2 in cohort)'], input_type=list]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\neducation.2.details\\n  Input should be a valid string [type=string_type, input_value=[], input_type=list]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\nprojects.0.description\\n  Input should be a valid string [type=string_type, input_value=['Enhancing flow matching...orrect threshold side.'], input_type=list]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\nprojects.1.description\\n  Input should be a valid string [type=string_type, input_value=['Stabilising self-distil... fewer training steps.'], input_type=list]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\nprojects.2.description\\n  Input should be a valid string [type=string_type, input_value=['Processed 21.45M click ...uture-context leakage.'], input_type=list]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\nskills.0\\n  Input should be a valid string [type=string_type, input_value={'category': 'Programming....', 'confidence': 0.95}}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\nskills.1\\n  Input should be a valid string [type=string_type, input_value={'category': 'Statistics ....', 'confidence': 0.95}}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\nskills.2\\n  Input should be a valid string [type=string_type, input_value={'category': 'Probabilist....', 'confidence': 0.95}}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\nskills.3\\n  Input should be a valid string [type=string_type, input_value={'category': 'Model Evalu....', 'confidence': 0.95}}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\nskills.4\\n  Input should be a valid string [type=string_type, input_value={'category': 'LLMs', 'ite....', 'confidence': 0.95}}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\nskills.5\\n  Input should be a valid string [type=string_type, input_value={'category': 'Engineering....', 'confidence': 0.95}}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\\nskills.6\\n  Input should be a valid string [type=string_type, input_value={'category': 'Languages',...es', 'confidence': 0.5}}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.13/v/string_type\"}",
+      "manual_review_required": true,
+      "task_id": "resume-en-ai",
+      "run_index": 1,
+      "status": "completed",
+      "latency_ms": 90083.71,
+      "trace_task_id": "51cfaa91-64ab-4906-9cd4-7f209b09502d"
+    }
+  ],
+  "summary": {
+    "task_count": 1,
+    "successful_task_rate": 0.0,
+    "capability_score": 50.0,
+    "dimensions": {
+      "completion": 100.0,
+      "tool_use": 0.0,
+      "evidence": 0.0,
+      "safety": 100.0,
+      "recovery": null
+    },
+    "average_model_calls": 2.0,
+    "average_tool_calls": 0.0,
+    "average_total_tokens": 13743.0,
+    "total_tokens": 13743
+  },
+  "blocked_runs": 0,
+  "skipped_runs": 0
+}

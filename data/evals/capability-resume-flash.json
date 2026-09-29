@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-09-29T14:48:36.530944+00:00",
+  "database": "/var/folders/vy/bsgsljp11x7g8v5cmvnjhj4w0000gn/T/macpilot-capability-3j1ghx8w.sqlite3",
+  "records": [
+    {
+      "task_id": "resume-en-ai",
+      "run_index": 1,
+      "status": "blocked",
+      "blocked_reason": "Request timed out.",
+      "latency_ms": 361946.2,
+      "trace_task_id": "96b179f4-2d76-496b-bcde-024dc9e88c9d"
+    }
+  ],
+  "summary": {
+    "task_count": 0,
+    "successful_task_rate": 0.0,
+    "capability_score": 0.0,
+    "dimensions": {
+      "completion": null,
+      "tool_use": null,
+      "evidence": null,
+      "safety": null,
+      "recovery": null
+    },
+    "average_model_calls": 0.0,
+    "average_tool_calls": 0.0,
+    "average_total_tokens": 0.0,
+    "total_tokens": 0
+  },
+  "blocked_runs": 1,
+  "skipped_runs": 0
+}

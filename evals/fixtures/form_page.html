@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Resume Draft Test</title></head>
+<body>
+  <main>
+    <h1>Resume Draft Test</h1>
+    <form id="resume-form">
+      <label>Full name <input name="name" type="text"></label>
+      <label>Email <input name="email" type="email"></label>
+      <label>Phone <input name="phone" type="tel"></label>
+      <label>Summary <textarea name="summary"></textarea></label>
+      <section id="education-section">
+        <h2>Education</h2>
+        <div class="education-entry"><input name="education_school[]" aria-label="Education school"></div>
+        <button type="button" data-add="education">Add another education</button>
+      </section>
+      <section id="project-section">
+        <h2>Projects</h2>
+        <div class="project-entry"><input name="project_name[]" aria-label="Project name"><textarea name="project_description[]" aria-label="Project description"></textarea></div>
+        <button type="button" data-add="project">Add another project</button>
+      </section>
+      <button type="submit">Submit application</button>
+    </form>
+  </main>
+  <script>
+    document.querySelectorAll("[data-add]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const section = button.closest("section");
+        const entry = section.querySelector("[class$='-entry']").cloneNode(true);
+        entry.querySelectorAll("input, textarea").forEach((field) => { field.value = ""; });
+        section.insertBefore(entry, button);
+      });
+    });
+  </script>
+</body>
+</html>

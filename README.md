@@ -1,244 +1,168 @@
 # MacPilot
 
-MacPilot is a local-first macOS computer-use agent prototype built with
-LangChain, LangGraph, FastAPI, and Tauri. It turns a natural-language goal
-into an observable, resumable workflow while keeping filesystem, browser, and
-high-risk actions behind explicit policy boundaries.
+MacPilot 是一个本地优先的简历自动化与 Computer-Use Agent 原型。它使用
+FastAPI、LangGraph、React/Tauri、SQLite 和 Playwright，把简历读取、字段映射、
+网页表单识别和草稿填写组织成可追踪的工作流。
 
-The project focuses on reliability rather than unconstrained autonomy:
+## 当前能力
 
-- structured planning with `Planner → Researcher → Critic → Finalizer`
-- durable SQLite task, step, approval, and audit-event storage
-- LangGraph checkpoints, retry, pause, resume, and cancellation
-- filesystem and browser allowlists with read-only defaults
-- untrusted webpage content and prompt-injection detection
-- human approval gates for high-risk actions
-- 50 deterministic Phase 5 regression tasks and trace-based metrics
-- a Tauri + React desktop application for task execution and review
+- 从 PDF、DOCX、Markdown 和 TXT 简历中提取结构化 `ResumeProfile`；
+- 保留教育、研究/工作经历和项目经历的数组结构与证据来源；
+- 根据经历数量动态创建教育和项目字段；
+- 使用 LangGraph checkpoint、任务状态、审计事件和 Token 用量记录；
+- 浏览器访问使用域名白名单，网页内容按不可信数据处理；
+- 表单默认只填写草稿，不自动提交；高风险操作需要人工审批；
+- 提供离线回归评测和真实任务 Trace 指标。
 
-## Project structure
+## Agent 流程
+
+```text
+简历 PDF
+   │
+   ▼
+CV Extractor
+   │  ResumeProfile + evidence
+   ▼
+字段校验与映射
+   │
+   ├── 本地简历工作区：回填基本信息、教育、工作和项目经历
+   │
+   └── 外部网页表单：Form Filler → inspect_form → 动态创建字段 → 填写草稿
+```
+
+`Form Filler` 只使用上一阶段的 `ResumeProfile`，不能自行补造内容，也不会点击最终提交按钮。
+
+## 项目结构
 
 ```text
 src/macpilot/
-├── core/
-│   ├── cache.py          # Local SQLite response cache
-│   ├── checkpoint.py     # Durable LangGraph checkpoints
-│   ├── config.py         # Environment-backed runtime settings
-│   ├── context.py        # Context budgets and message trimming
-│   ├── models.py         # Task / Step / Approval / Event contracts
-│   ├── storage.py        # SQLite task and audit storage
-│   └── usage.py          # Token usage and cost estimation
-├── phase1/
-│   └── filesystem.py     # Workspace-scoped filesystem tools
-├── phase2/
-│   └── workflow.py       # Planner / Researcher / Critic / Finalizer
-├── phase3/
-│   ├── browser.py        # Playwright and webpage safety handling
-│   ├── documents.py      # PDF / Word / Excel extraction
-│   ├── resume_profile.py # Evidence-aware ResumeProfile model
-│   └── security.py       # Browser domain allowlist
-├── phase5/
-│   ├── metrics.py        # Evaluation and trace metrics
-│   └── runner.py         # Offline regression runner and reports
-├── api.py                # FastAPI application
-└── cli.py                # Interactive command-line client
+├── api.py                    # FastAPI 任务、上传和消息接口
+├── phase2/workflow.py        # LangGraph 工作流与 CV Extractor/Form Filler
+├── phase3/documents.py       # PDF、DOCX、Excel 和文本解析
+├── phase3/resume_profile.py  # ResumeProfile 数据契约
+├── phase3/browser.py         # Playwright 浏览器与表单工具
+├── core/storage.py           # SQLite 任务、步骤和审计事件
+└── phase5/                   # 离线评测与指标
 
-apps/desktop/             # Tauri + React desktop client
-evals/                    # 50 evaluation task definitions
-docs/                     # Architecture, demo, and release documentation
-tests/                    # Unit and integration tests
+apps/desktop/src/App.tsx      # React 简历表单界面
+evals/                        # 能力评测任务和固定表单
+tests/                        # 单元测试和 API 测试
+docs/                         # 架构与演示文档
 ```
 
-## Requirements
+## 环境要求
 
 - Python 3.12+
-- Optional: Node.js, Rust, and the Tauri CLI for the desktop application
-- A Qwen/DashScope-compatible API key for live model execution
+- Node.js 18+
+- Qwen/DashScope 兼容 API Key（运行实时 Agent 时需要）
 
-## Installation
+## 安装
 
 ```bash
-cp .env.example .env
-# Edit .env and set DASHSCOPE_API_KEY for live model execution.
+cd /Users/alan/Desktop/agent
+source .venv/bin/activate
 .venv/bin/pip install -e '.[dev,phase3]'
+
+cd apps/desktop
+npm install
 ```
 
-The default workspace is `data/workspace`. The default mode is read-only, and
-browser access is disabled until domains are explicitly allowlisted.
+在项目根目录创建 `.env`，至少配置：
 
-## Run the agent
+```env
+DASHSCOPE_API_KEY=你的百炼APIKey
+QWEN_MODEL=qwen3.8-flash
+QWEN_REGION=cn-beijing
+QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+MACPILOT_WORKSPACE=./data/workspace
+MACPILOT_READ_ONLY=true
+```
 
-Start the interactive CLI:
+不要把 `.env` 或 API Key 提交到 GitHub。
+
+## 启动前后端
+
+终端一：
 
 ```bash
-.venv/bin/macpilot
-```
-
-Example request:
-
-```text
-Read all workspace files and summarize the project's positioning, current capabilities, and target users.
-```
-
-Start the local API:
-
-```bash
+cd /Users/alan/Desktop/agent
+source .venv/bin/activate
 .venv/bin/macpilot-api
 ```
 
-Then open [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for the
-interactive API documentation.
+后端地址：[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
-## API endpoints
+终端二：
 
-| Method | Endpoint | Purpose |
-|---|---|---|
-| `GET` | `/health` | Health check |
-| `POST` | `/tasks` | Create a task |
-| `GET` | `/tasks/{task_id}` | Inspect task status |
-| `POST` | `/tasks/{task_id}/messages` | Send a message and run the agent |
-| `GET` | `/tasks/{task_id}/files` | List files uploaded to the task workspace |
-| `POST` | `/tasks/{task_id}/files` | Upload a task-local source document |
-| `GET` | `/tasks/{task_id}/steps` | List workflow steps |
-| `GET` | `/tasks/{task_id}/events` | List audit events |
-| `GET` | `/tasks/{task_id}/approvals` | List approval requests |
-| `POST` | `/tasks/{task_id}/approvals/{approval_id}` | Approve or reject an action |
-| `POST` | `/tasks/{task_id}/resume` | Resume a paused task |
-| `POST` | `/tasks/{task_id}/cancel` | Cancel an unfinished task |
-| `GET` | `/metrics` | Aggregate all persisted task metrics |
-| `GET` | `/tasks/{task_id}/metrics` | Inspect metrics for one task |
+```bash
+cd /Users/alan/Desktop/agent/apps/desktop
+npm run dev
+```
 
-Example:
+前端地址：[http://127.0.0.1:1420/](http://127.0.0.1:1420/)
+
+如果端口已经被旧进程占用，先查找并停止对应进程：
+
+```bash
+lsof -nP -iTCP:8000 -sTCP:LISTEN
+lsof -nP -iTCP:1420 -sTCP:LISTEN
+kill <PID>
+```
+
+## 简历测试
+
+1. 打开前端；
+2. 选择 PDF 简历；
+3. 点击“解析并填入表单”；
+4. 检查基本信息、教育经历、工作经历和项目经历；
+5. 只有在明确授权域名后，才使用 Browser Agent 填写外部网页草稿。
+
+系统不会自动提交外部表单。
+
+## API 示例
 
 ```bash
 curl -X POST http://127.0.0.1:8000/tasks \
   -H 'Content-Type: application/json' \
-  -d '{"user_goal":"Summarize the local project files"}'
+  -d '{"user_goal":"读取上传的简历并提取 ResumeProfile"}'
 ```
 
-Use the returned task ID to send a message:
+主要接口：
 
-```bash
-curl -X POST http://127.0.0.1:8000/tasks/TASK_ID/messages \
-  -H 'Content-Type: application/json' \
-  -d '{"content":"Read all files and produce a concise summary"}'
-```
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/health` | 健康检查 |
+| POST | `/tasks` | 创建任务 |
+| POST | `/tasks/{id}/files` | 上传源文件 |
+| POST | `/tasks/{id}/messages/stream` | 运行并流式返回 Agent 进度 |
+| GET | `/tasks/{id}/events` | 查看审计事件 |
+| GET | `/tasks/{id}/metrics` | 查看任务指标 |
 
-Every tool call, model usage record, approval, error, and assistant response is
-stored in `data/macpilot.sqlite3`. The database is local-only by default.
+## 评测与测试
 
-The desktop client also accepts PDF, Word, Excel, Markdown, TXT, CSV, JSON, and
-YAML files by drag-and-drop or file selection. Uploaded files are saved under
-`data/workspace/uploads/<task_id>/`, are limited by `MACPILOT_MAX_FILE_BYTES`,
-and are passed to the agent as task-local source files. Uploading is an explicit
-user input action; it does not enable agent-initiated writes while the workspace
-remains in the default read-only mode.
-
-## Security model
-
-- `MACPILOT_WORKSPACE` is the only filesystem root available to tools.
-- Path traversal and symlink escapes are rejected.
-- Writes are disabled unless `MACPILOT_READ_ONLY=false` is explicitly set.
-- Browser access requires an explicit domain allowlist:
-
-  ```env
-  MACPILOT_ALLOWED_BROWSER_DOMAINS=example.com,wikipedia.org
-  ```
-
-- Browser research is restricted to allowlisted domains. The interactive
-  browser can open pages, inspect fields, and fill a non-submitted form draft;
-  it does not submit forms, upload files, or send messages.
-- Browser sessions use a task-local persistent profile. Set
-  `MACPILOT_BROWSER_HEADLESS=false` when a visible browser window is needed.
-- Form submission is available only for an explicit submission goal after the
-  task reaches `waiting_approval` and the matching approval is accepted. The
-  executor requires exactly one enabled submit button; ambiguous pages are
-  left unchanged.
-- Webpage text is treated as untrusted data. Instruction-like content is
-  surfaced as a prompt-injection warning and cannot change system policy.
-- High-risk plans pause in `waiting_approval` before execution.
-- Approval routing is enforced by a deterministic policy layer. Model plans
-  may add an approval requirement, but cannot downgrade known high-risk tools
-  such as form submission, deletion, command execution, or message sending.
-- Task-local uploads, browser profiles, and browser drafts are runtime data and
-  are excluded from version control.
-- API keys are read from environment variables and must never be committed.
-
-If Chromium is not installed for Playwright:
-
-```bash
-.venv/bin/playwright install chromium
-```
-
-## Phase 5 evaluation and optimization
-
-Evaluation tasks are defined in `evals/tasks.json`: 10 local-file tasks, 15
-web-research tasks, 10 document tasks, 8 failure-recovery tasks, and 7
-security tasks.
-
-The default evaluation is deterministic and offline. It does not make network
-requests or require an API key:
+离线评测不调用模型：
 
 ```bash
 .venv/bin/macpilot-evals --output data/evals/latest.json
-# Or run one category:
-.venv/bin/python evals/run_evals.py --category security
 ```
 
-The command writes both JSON and Markdown reports. The offline report is a
-policy/tool regression report, not a claim of live end-to-end model
-performance. To aggregate real task traces from SQLite as well:
+运行测试：
 
 ```bash
-.venv/bin/macpilot-evals \
-  --database data/macpilot.sqlite3 \
-  --output data/evals/latest.json
+PYTHONPATH=src .venv/bin/pytest -q
 ```
 
-Reports include task success rate, average steps, tool calls, recovery rate,
-unauthorized actions, prompt-injection detection, citation correctness, token
-usage, estimated cost, and cache hit rate. Cost estimates default to zero and
-are only enabled when per-million-token prices are configured in `.env`.
+评测关注成功率、平均步骤数、工具调用数、恢复率、Prompt Injection 阻断、
+Token 用量和估算成本。离线评测结果不能替代真实模型端到端评测。
 
-Phase 5 also enables a local SQLite response cache and context budgeting by
-default. Cache hits never bypass tools, approvals, or policy checks. Tune them
-with:
+## 安全边界
 
-```env
-MACPILOT_CONTEXT_MAX_TOKENS=12000
-MACPILOT_CACHE_ENABLED=true
-MACPILOT_CACHE_TTL_SECONDS=86400
-```
+- 默认只读，不允许 Agent 任意写入工作区；
+- 文件访问限制在 `MACPILOT_WORKSPACE`；
+- 浏览器只允许访问显式授权域名；
+- 网页中的指令不会改变系统策略；
+- 表单提交、删除、命令执行和消息发送等高风险操作需要审批；
+- 简历上传和模型调用只用于当前任务，不会自动公开或提交。
 
-The latest generated report is available at:
-
-- `data/evals/latest.json`
-- `data/evals/latest.md`
-
-## Tests
-
-```bash
-.venv/bin/pytest
-```
-
-## Desktop application
-
-The Tauri + React desktop client is located in `apps/desktop`. It provides
-task input, a workflow timeline, approval dialogs, result preview, task
-cancellation, and a macOS tray entry point.
-
-```bash
-cd apps/desktop
-npm install
-npm run tauri dev
-```
-
-The desktop client connects to the local FastAPI server at
-`http://127.0.0.1:8000` by default.
-
-## Documentation
-
-- [Architecture](docs/architecture.md)
-- [3-minute demo script](docs/demo-script.md)
-- [Release checklist](docs/release-checklist.md)
-- [Project plan](plan.md)
+更多设计说明见 [docs/architecture.md](docs/architecture.md) 和
+[docs/demo-script.md](docs/demo-script.md)。

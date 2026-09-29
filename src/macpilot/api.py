@@ -23,6 +23,7 @@ from macpilot.core.config import Settings
 from macpilot.core.storage import SQLiteStore, TaskRecord
 from macpilot.phase2.workflow import build_agent_workflow
 from macpilot.phase5.metrics import summarize_task_traces
+from macpilot.phase3.security import BrowserPolicyError, DomainAllowlist, normalize_domain
 
 
 class CreateTaskRequest(BaseModel):
@@ -54,6 +55,12 @@ SUPPORTED_UPLOAD_EXTENSIONS = {
     ".xlsx",
     ".yaml",
     ".yml",
+}
+MIME_TO_EXTENSION = {
+    "application/pdf": ".pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "text/plain": ".txt",
+    "text/markdown": ".md",
 }
 MAX_FILES_PER_TASK = 20
 
@@ -111,6 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     load_dotenv(override=True)
     settings = settings or Settings.from_env()
     store = SQLiteStore(settings.database_path)
+    domain_allowlist = DomainAllowlist.from_domains(settings.allowed_browser_domains)
     checkpointer, checkpoint_connection = make_sqlite_checkpointer(
         settings.database_path
     )
@@ -144,6 +152,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.store = store
     app.state.checkpointer = checkpointer
     app.state.checkpoint_connection = checkpoint_connection
+    app.state.domain_allowlist = domain_allowlist
 
     def get_task_or_404(task_id: str) -> TaskRecord:
         task = store.get_task(task_id)
@@ -217,6 +226,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "macpilot"}
+
+    @app.get("/browser/domains")
+    def list_browser_domains() -> dict[str, list[str]]:
+        return {
+            "permanent": sorted(domain_allowlist.permanent),
+            "temporary": sorted(domain_allowlist.temporary),
+        }
+
+    @app.post("/browser/domains/check")
+    def check_browser_domain(payload: dict[str, str]) -> dict[str, Any]:
+        from urllib.parse import urlparse
+        parsed = urlparse(str(payload.get("url", "")).strip())
+        domain = normalize_domain(parsed.hostname or "")
+        return {
+            "domain": domain,
+            "allowed": parsed.scheme == "https" and domain_allowlist.contains(domain),
+            "requires_approval": parsed.scheme == "https" and not domain_allowlist.contains(domain),
+        }
+
+    @app.post("/browser/domains/approve")
+    def approve_browser_domain(payload: dict[str, str]) -> dict[str, Any]:
+        domain = str(payload.get("domain", ""))
+        try:
+            normalized = domain_allowlist.add_temporary(domain)
+        except BrowserPolicyError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        store.append_event("domain_authorized", {"domain": normalized, "temporary": True})
+        return {"ok": True, "domain": normalized, "temporary": True}
+
+    @app.delete("/browser/domains/temporary/{domain}")
+    def revoke_browser_domain(domain: str) -> dict[str, Any]:
+        normalized = normalize_domain(domain)
+        domain_allowlist.remove_temporary(normalized)
+        store.append_event("domain_revoked", {"domain": normalized, "temporary": True})
+        return {"ok": True, "domain": normalized}
 
     def task_trace(task: TaskRecord) -> dict[str, Any]:
         return {
@@ -298,8 +342,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         filename = _safe_upload_filename(file.filename)
         suffix = Path(filename).suffix.lower()
         if suffix not in SUPPORTED_UPLOAD_EXTENSIONS:
+            inferred_suffix = MIME_TO_EXTENSION.get((file.content_type or "").lower())
+            if inferred_suffix:
+                filename = f"{filename}{inferred_suffix}"
+                suffix = inferred_suffix
+        if suffix not in SUPPORTED_UPLOAD_EXTENSIONS:
             allowed = ", ".join(sorted(SUPPORTED_UPLOAD_EXTENSIONS))
-            raise HTTPException(status_code=415, detail=f"不支持的文件类型。支持：{allowed}")
+            raise HTTPException(status_code=415, detail=f"不支持的文件类型（文件名：{filename}，MIME：{file.content_type or '未知'}）。支持：{allowed}")
 
         existing = _list_task_files(settings, task.session_id)
         if len(existing) >= MAX_FILES_PER_TASK:
@@ -342,6 +391,91 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         store.append_event("file_uploaded", metadata, task_id=task_id)
         return metadata
 
+    @app.post("/tasks/{task_id}/resume/quick-profile")
+    def quick_resume_profile(task_id: str) -> dict[str, Any]:
+        """Extract obvious resume fields locally before the slower Agent run."""
+        task = get_task_or_404(task_id)
+        files = _list_task_files(settings, task.session_id)
+        resume = next((item for item in reversed(files) if item["format"] in {"pdf", "docx", "txt", "md"}), None)
+        if resume is None:
+            raise HTTPException(status_code=404, detail="No resume file uploaded")
+        path = settings.workspace.expanduser().resolve() / resume["path"]
+        from macpilot.phase3.documents import extract_document
+        text = extract_document(path, settings.max_file_bytes)
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        email = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", text)
+        phone = re.search(r"(?:\+?\d[\d ()-]{8,}\d)", text)
+        name = next((line for line in lines[:8] if 2 <= len(line) <= 24 and not re.search(r"[@|：:]", line) and not re.search(r"\d{3,}", line)), "")
+        location = ""
+        location_match = re.search(r"中国[^|\n]*?(?:省|市|区|县)", text)
+        if location_match:
+            location = location_match.group(0).strip()
+        summary = ""
+        for index, line in enumerate(lines):
+            if line in {"个人简介", "个人总结", "简介"} and index + 1 < len(lines):
+                summary = lines[index + 1]
+                break
+        skills = ""
+        for index, line in enumerate(lines):
+            if line in {"专业技能", "技能特长", "技能"} and index + 1 < len(lines):
+                skills = lines[index + 1]
+                break
+        section_titles = {"教育背景", "教育经历", "EDUCATION", "工作经历", "实习经历", "研究经历", "RESEARCH EXPERIENCE", "WORK EXPERIENCE", "项目经历", "项目经验", "精选项目", "SELECTED PROJECTS", "PROJECTS", "证书与荣誉", "荣誉", "AWARDS & SCHOLARSHIPS", "AWARDS", "技能", "技能特长", "SKILLS", "LANGUAGES"}
+        def section_after(titles: set[str]) -> list[str]:
+            start = next((index for index, line in enumerate(lines) if line in titles), None)
+            if start is None:
+                return []
+            end = next((index for index in range(start + 1, len(lines)) if lines[index] in section_titles), len(lines))
+            return lines[start + 1:end]
+        education_lines = section_after({"教育背景", "教育经历", "EDUCATION"})
+        project_lines = section_after({"项目经历", "项目经验", "精选项目", "SELECTED PROJECTS", "PROJECTS"})
+        work_lines = section_after({"工作经历", "实习经历", "研究经历", "RESEARCH EXPERIENCE", "WORK EXPERIENCE"})
+        date_pattern = re.compile(r"\d{2,4}[./年-]\d{1,2}(?:\s*[—–-]\s*(?:\d{2,4}[./年-]\d{1,2}|至今|现在))?")
+        project_period_match = next((date_pattern.search(line) for line in project_lines[:5] if date_pattern.search(line)), None)
+        education_period_match = next((date_pattern.search(line) for line in education_lines[:8] if date_pattern.search(line)), None)
+        work_period_match = next((date_pattern.search(line) for line in work_lines[:8] if date_pattern.search(line)), None)
+        education_text = "\n".join(education_lines[:6])[:2000]
+        def dated_entries(source_lines: list[str], name_key: str) -> list[dict[str, str]]:
+            """Group each dated entry while keeping headings and institutions."""
+            date_indexes = [index for index, line in enumerate(source_lines) if date_pattern.search(line)]
+            entries: list[dict[str, str]] = []
+            for position, date_index in enumerate(date_indexes):
+                period_match = date_pattern.search(source_lines[date_index])
+                if not period_match:
+                    continue
+                previous_date = date_indexes[position - 1] if position else -1
+                before_date = [line for line in source_lines[previous_date + 1:date_index] if line]
+                heading = before_date[0] if before_date else ""
+                next_date = date_indexes[position + 1] if position + 1 < len(date_indexes) else len(source_lines)
+                after_date = [line for line in source_lines[date_index + 1:next_date] if line]
+                if name_key == "school":
+                    institution = next((line for line in before_date[1:] if re.search(r"大学|学院|University|College|Institute|School", line, re.I)), "")
+                    name = " · ".join(item for item in (heading, institution) if item)
+                    detail = "\n".join(line for line in before_date[1:] if line != institution)
+                    entries.append({name_key: name, "period": period_match.group(0), "detail": detail})
+                elif name_key == "name":
+                    detail_lines = list(after_date)
+                    while detail_lines and (re.search(r"大学|学院|University|College|Institute", detail_lines[0], re.I) or re.fullmatch(r"中国|英国|美国|澳大利亚|加拿大|China|UK|US|United Kingdom", detail_lines[0], re.I)):
+                        detail_lines.pop(0)
+                    entries.append({name_key: heading, "period": period_match.group(0), "detail": "\n".join(detail_lines)})
+                else:
+                    company = next((line for line in after_date if re.search(r"大学|学院|University|College|Institute", line, re.I)), "")
+                    detail_lines = [line for line in after_date if line != company and not re.fullmatch(r"中国|英国|美国|China|UK|US|United Kingdom", line, re.I)]
+                    entries.append({name_key: company or heading, "period": period_match.group(0), "detail": "\n".join(detail_lines)})
+            return entries
+
+        education_entries = dated_entries(education_lines, "school")
+        project_entries = dated_entries(project_lines, "name")
+        project_name = project_entries[0]["name"] if project_entries else project_lines[0] if project_lines else ""
+        project_detail = project_entries[0].get("detail", "") if project_entries else "\n".join(project_lines[1:])
+        project_detail = project_detail[:4000]
+        work_entries = dated_entries(work_lines, "company")
+        work_company = work_entries[0]["company"] if work_entries else ""
+        work_detail = work_entries[0].get("detail", "")[:3000] if work_entries else ""
+        profile = {"name": name, "email": email.group(0) if email else "", "phone": phone.group(0).strip() if phone else "", "location": location, "summary": summary, "skills": skills, "education": education_text, "education_period": education_period_match.group(0) if education_period_match else "", "education_entries": education_entries, "work_company": work_company, "work_period": work_period_match.group(0) if work_period_match else "", "work_detail": work_detail, "project_name": project_name, "project_period": project_period_match.group(0) if project_period_match else "", "project_detail": project_detail, "project_entries": project_entries}
+        store.append_event("resume_quick_profile", {"fields": [key for key, value in profile.items() if value]}, task_id=task_id)
+        return {"ok": True, "profile": profile, "source": resume["path"], "message": "已先完成本地快速提取，Agent 将继续完善其余字段。"}
+
     @app.post("/tasks/{task_id}/approvals/{approval_id}")
     def resolve_approval(
         task_id: str,
@@ -376,6 +510,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             task_id=task_id,
             session_id=task.session_id,
             checkpointer=checkpointer,
+            allowlist=domain_allowlist,
         )
         try:
             result = workflow.invoke(

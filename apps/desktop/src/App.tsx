@@ -1,578 +1,114 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
-const API_BASE = "http://127.0.0.1:8000";
+type Section = "基本信息" | "教育经历" | "工作经历" | "项目经历" | "技能特长" | "证书与荣誉" | "自我评价";
+type FormState = Record<string, string>;
+type RepeatItem = { id: string; [key: string]: string };
 
-type TaskStatus = "pending" | "running" | "waiting_approval" | "failed" | "completed" | "cancelled";
-
-type Task = {
-  id: string;
-  session_id: string;
-  user_goal: string;
-  status: TaskStatus;
-  plan: Record<string, unknown> | null;
-};
-
-type Session = {
-  id: string;
-  title: string;
-  status: string;
-  updated_at: string;
-  archived_at: string | null;
-};
-
-type ChatMessage = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  created_at: string;
-};
-
-type Approval = {
-  id: string;
-  action_type: string;
-  risk_reason: string;
-  preview: string;
-  status: "pending" | "approved" | "rejected";
-};
-
-type UploadedFile = {
-  name: string;
-  original_name?: string;
-  path: string;
-  size: number;
-  format: string;
-};
-
-const ACCEPTED_EXTENSIONS = [".pdf", ".docx", ".xlsx", ".xlsm", ".txt", ".md", ".csv", ".json", ".yaml", ".yml"];
-const MAX_FILE_BYTES = 200_000;
-
-const statusText: Record<TaskStatus, string> = {
-  pending: "待开始",
-  running: "执行中",
-  waiting_approval: "等待审批",
-  failed: "失败",
-  completed: "已完成",
-  cancelled: "已终止",
-};
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const isMultipart = init?.body instanceof FormData;
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: isMultipart ? init?.headers : { "Content-Type": "application/json", ...init?.headers },
-    ...init,
-  });
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `请求失败：${response.status}`);
-  }
-  return response.json() as Promise<T>;
+function joinDistinct(values: Array<string | undefined>, separator = " · ") {
+  return [...new Set(values.filter((value): value is string => Boolean(value && value.trim())))].join(separator);
 }
 
-async function notify(title: string, body: string) {
-  try {
-    const module = await import("@tauri-apps/plugin-notification");
-    await module.sendNotification({ title, body });
-  } catch {
-    if ("Notification" in window && Notification.permission === "granted") {
-      new Notification(title, { body });
-    }
-  }
+function educationLabel(item: Record<string, string>) {
+  return joinDistinct([item.field_of_study, item.school, item.degree]);
+}
+
+const API_BASE = "http://127.0.0.1:8000";
+const sections: { name: Section; icon: string; fields: { key: string; label: string; placeholder: string; wide?: boolean }[] }[] = [
+  { name: "基本信息", icon: "◎", fields: [{ key: "name", label: "姓名", placeholder: "例如：林晓川" }, { key: "role", label: "目标职位", placeholder: "例如：产品设计师" }, { key: "email", label: "邮箱", placeholder: "name@example.com" }, { key: "phone", label: "电话", placeholder: "+86 138 0000 0000" }, { key: "location", label: "所在城市", placeholder: "例如：上海" }, { key: "links", label: "个人链接", placeholder: "LinkedIn / GitHub / 作品集" }] },
+  { name: "教育经历", icon: "▣", fields: [{ key: "education", label: "专业与学校", placeholder: "例如：交互设计 · 同济大学 · 硕士" }, { key: "education_period", label: "时间", placeholder: "例如：2021.09 — 2024.06" }, { key: "education_detail", label: "补充说明", placeholder: "课程、成绩或相关活动（可选）", wide: true }] },
+  { name: "工作经历", icon: "▤", fields: [{ key: "work_company", label: "公司与职位", placeholder: "例如：澄明科技 · 高级产品设计师" }, { key: "work_period", label: "时间", placeholder: "例如：2023.06 — 至今" }, { key: "work_detail", label: "工作内容与成果", placeholder: "描述职责、影响和可量化成果", wide: true }] },
+  { name: "项目经历", icon: "◇", fields: [{ key: "project_name", label: "项目名称", placeholder: "例如：企业协作平台 2.0" }, { key: "project_period", label: "项目时间", placeholder: "例如：2024.03 — 2024.08" }, { key: "project_role", label: "项目角色", placeholder: "例如：负责人 / 产品设计" }, { key: "project_detail", label: "项目介绍", placeholder: "目标、行动、结果与使用的工具或技术", wide: true }] },
+  { name: "技能特长", icon: "✦", fields: [{ key: "skills", label: "技能与工具", placeholder: "例如：Figma、用户研究、原型设计、Python", wide: true }] },
+  { name: "证书与荣誉", icon: "♢", fields: [{ key: "honors", label: "证书与荣誉", placeholder: "例如：英语六级、校级一等奖学金", wide: true }] },
+  { name: "自我评价", icon: "≋", fields: [{ key: "summary", label: "自我评价", placeholder: "用 2–3 句话介绍你的优势、工作方式和职业方向", wide: true }] },
+];
+
+function RepeatableEditor({ items, fields, onChange, onAdd, onRemove }: { items: RepeatItem[]; fields: { key: string; label: string; placeholder: string; wide?: boolean }[]; onChange: (id: string, key: string, value: string) => void; onAdd: () => void; onRemove: (id: string) => void }) {
+  return <div className="repeatable-list">{items.map((item, index) => <div className="repeatable-card" key={item.id}><div className="repeatable-head"><strong>第 {index + 1} 条</strong>{items.length > 1 && <button type="button" className="remove-entry" onClick={() => onRemove(item.id)}>删除</button>}</div><div className="fields-grid">{fields.map((field) => <label className={field.wide ? "field wide" : "field"} key={field.key}><span>{field.label}</span>{field.wide ? <textarea value={item[field.key] ?? ""} onChange={(event) => onChange(item.id, field.key, event.target.value)} placeholder={field.placeholder} rows={4} /> : <input value={item[field.key] ?? ""} onChange={(event) => onChange(item.id, field.key, event.target.value)} placeholder={field.placeholder} />}</label>)}</div></div>)}<button type="button" className="add-entry" onClick={onAdd}>＋ 添加一条经历</button></div>;
 }
 
 function App() {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [goal, setGoal] = useState("");
-  const [task, setTask] = useState<Task | null>(null);
-  const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [uploadingFiles, setUploadingFiles] = useState<string[]>([]);
-  const [dragActive, setDragActive] = useState(false);
-  const [fileError, setFileError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [conclusion, setConclusion] = useState("");
-
-  const selectSession = useCallback(async (sessionId: string) => {
-    setActiveSessionId(sessionId);
-    setGoal("");
-    setTask(null);
-    setApprovals([]);
-    setPendingFiles([]);
-    setUploadedFiles([]);
-    setFileError(null);
-    setConclusion("");
-    try {
-      const [nextTask, nextMessages] = await Promise.all([
-        request<Task | null>(`/sessions/${sessionId}/task`),
-        request<ChatMessage[]>(`/sessions/${sessionId}/messages`),
-      ]);
-      setTask(nextTask);
-      setMessages(nextMessages);
-      if (nextTask) {
-        const [nextApprovals] = await Promise.all([
-          request<Approval[]>(`/tasks/${nextTask.id}/approvals`),
-        ]);
-        setApprovals(nextApprovals);
-      }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "会话加载失败");
-    }
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const nextSessions = await request<Session[]>("/sessions");
-        setSessions(nextSessions);
-        if (nextSessions.length > 0) await selectSession(nextSessions[0].id);
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "会话加载失败");
-      }
-    })();
-  }, [selectSession]);
-
-  async function createNewSession() {
-    if (loading) return;
-    try {
-      const created = await request<Session>("/sessions", {
-        method: "POST",
-        body: JSON.stringify({ title: "新会话" }),
-      });
-      setSessions((current) => [created, ...current]);
-      await selectSession(created.id);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "新建会话失败");
-    }
+  const [active, setActive] = useState<Section>("基本信息");
+  const [values, setValues] = useState<FormState>({});
+  const [preview, setPreview] = useState(false);
+  const [notice, setNotice] = useState("填写完成后可生成预览，内容只在当前设备处理。");
+  const [url, setUrl] = useState("");
+  const [domain, setDomain] = useState("");
+  const [domainState, setDomainState] = useState<"idle" | "checking" | "approval" | "allowed" | "error">("idle");
+  const [uploadTaskId, setUploadTaskId] = useState<string | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+  const [uploadState, setUploadState] = useState<"idle" | "uploading" | "ready" | "parsing" | "done" | "error">("idle");
+  const [webState, setWebState] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [parseProgress, setParseProgress] = useState(0);
+  const [educationEntries, setEducationEntries] = useState<RepeatItem[]>([{ id: "education-1", school: "", period: "", detail: "" }]);
+  const [projectEntries, setProjectEntries] = useState<RepeatItem[]>([{ id: "project-1", name: "", period: "", role: "", detail: "" }]);
+  useEffect(() => { const entries = values.education_entries; if (Array.isArray(entries) && entries.length > 0) setEducationEntries(entries as unknown as RepeatItem[]); }, [values.education_entries]);
+  const repeatableFilled = useMemo(() => educationEntries.reduce((count, item) => count + Object.entries(item).filter(([key, value]) => key !== "id" && Boolean(value)).length, 0) + projectEntries.reduce((count, item) => count + Object.entries(item).filter(([key, value]) => key !== "id" && Boolean(value)).length, 0), [educationEntries, projectEntries]);
+  const repeatableTotal = educationEntries.length * 3 + projectEntries.length * 4;
+  const filled = Object.values(values).filter(Boolean).length + repeatableFilled;
+  const total = sections.reduce((sum, item) => sum + item.fields.length, 0) + repeatableTotal;
+  const missing = useMemo(() => sections.flatMap((section) => section.fields.filter((field) => !values[field.key]).map((field) => field.label)), [values]);
+  function sectionProgress(section: { name: Section; fields: { key: string }[] }) {
+    if (section.name === "教育经历") return `${educationEntries.reduce((count, item) => count + Object.entries(item).filter(([key, value]) => key !== "id" && Boolean(value)).length, 0)}/${educationEntries.length * 3}`;
+    if (section.name === "项目经历") return `${projectEntries.reduce((count, item) => count + Object.entries(item).filter(([key, value]) => key !== "id" && Boolean(value)).length, 0)}/${projectEntries.length * 4}`;
+    return `${section.fields.filter((field) => values[field.key]).length}/${section.fields.length}`;
   }
-
-  async function ensureSession(): Promise<string> {
-    if (activeSessionId) return activeSessionId;
-    const created = await request<Session>("/sessions", {
-      method: "POST",
-      body: JSON.stringify({ title: "新会话" }),
-    });
-    setSessions((current) => [created, ...current]);
-    setActiveSessionId(created.id);
-    return created.id;
-  }
-
-  async function deleteSession(session: Session) {
-    if (loading) return;
-    const confirmed = window.confirm(
-      `确定删除“${session.title}”吗？\n\n这会同时删除会话记录、上传文件和对应的 RAG 索引，且无法恢复。`,
-    );
-    if (!confirmed) return;
-    setLoading(true);
-    setError(null);
+  function update(key: string, value: string) { setValues((current) => ({ ...current, [key]: value })); }
+  function clearAll() { setValues({}); setPreview(false); setNotice("已清空所有内容，可以重新填写。"); }
+  function generatePreview() { setPreview(true); setNotice(missing.length ? `预览已生成，还有 ${missing.length} 个字段未填写。` : "预览已生成，所有字段均已填写。"); }
+  function updateRepeat(items: RepeatItem[], setItems: Dispatch<SetStateAction<RepeatItem[]>>, id: string, key: string, value: string) { setItems(items.map((item) => item.id === id ? { ...item, [key]: value } : item)); }
+  async function checkDomain() { setDomainState("checking"); try { const response = await fetch(`${API_BASE}/browser/domains/check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }); if (!response.ok) throw new Error(); const result = await response.json() as { domain: string; allowed: boolean; requires_approval: boolean }; setDomain(result.domain); setDomainState(result.allowed ? "allowed" : result.requires_approval ? "approval" : "error"); } catch { setDomainState("error"); } }
+  async function approveDomain() { const response = await fetch(`${API_BASE}/browser/domains/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ domain }) }); if (response.ok) { setDomainState("allowed"); setNotice(`已临时授权 ${domain}，Agent 可以继续访问。`); } else setDomainState("error"); }
+  async function uploadResume(file: File) {
+    if (!/[.]((pdf)|(docx)|(txt)|(md))$/i.test(file.name) && !file.type) { setUploadState("error"); setNotice("仅支持 PDF、Word 或文本简历。"); return; }
+    setUploadState("uploading");
     try {
-      await request(`/sessions/${session.id}`, { method: "DELETE" });
-      const remaining = sessions.filter((item) => item.id !== session.id);
-      if (session.id === activeSessionId) {
-        if (remaining.length > 0) {
-          setSessions(remaining);
-          await selectSession(remaining[0].id);
-        } else {
-          setSessions([]);
-          setActiveSessionId(null);
-          setTask(null);
-          setMessages([]);
-          setApprovals([]);
-          setPendingFiles([]);
-          setUploadedFiles([]);
-          setConclusion("");
+      const taskResponse = await fetch(`${API_BASE}/tasks`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_goal: "读取上传的简历，提取基本信息、教育经历、工作经历、项目经历、技能特长和证书荣誉" }) });
+      if (!taskResponse.ok) throw new Error();
+      const task = await taskResponse.json() as { id: string };
+      const body = new FormData(); body.append("file", file, file.name || "resume.pdf");
+      const uploadResponse = await fetch(`${API_BASE}/tasks/${task.id}/files`, { method: "POST", body });
+      if (!uploadResponse.ok) { const error = await uploadResponse.json().catch(() => ({})) as { detail?: string }; throw new Error(error.detail || `上传失败（${uploadResponse.status}）`); }
+      setUploadTaskId(task.id); setUploadedFile(file.name); setUploadState("ready");
+      setNotice("简历已上传，点击解析后由 CV Extractor 生成 ResumeProfile。");
+    } catch (error) { setUploadState("error"); setNotice(error instanceof Error ? error.message : "上传失败，请确认本地 Agent 服务已启动。"); }
+  }
+  async function parseResume() {
+    if (!uploadTaskId) return;
+    setUploadState("parsing"); setParseProgress(8); setNotice("CV Extractor 正在读取简历…");
+    try {
+      const response = await fetch(`${API_BASE}/tasks/${uploadTaskId}/messages/stream`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "请使用 CV Extractor 读取上传的简历，只输出 ResumeProfile。" }) });
+      if (!response.ok || !response.body) throw new Error("Extractor 请求失败");
+      const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let conclusion = "";
+      while (true) {
+        const { value, done } = await reader.read(); buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+        const blocks = buffer.split("\n\n"); buffer = blocks.pop() ?? "";
+        for (const block of blocks) {
+          const event = block.match(/^event: (.+)$/m)?.[1]; const dataLine = block.match(/^data: (.+)$/m)?.[1]; if (!event || !dataLine) continue;
+          const data = JSON.parse(dataLine) as Record<string, unknown>;
+          if (event === "thinking") { setNotice(String(data.message ?? "CV Extractor 正在处理…")); setParseProgress(42); }
+          if (event === "conclusion") { conclusion += String(data.delta ?? ""); setParseProgress(84); }
+          if (event === "error") throw new Error(String(data.message ?? "Extractor 解析失败"));
         }
-      } else {
-        setSessions(remaining);
+        if (done) break;
       }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "删除会话失败");
-    } finally {
-      setLoading(false);
-    }
+      const parsed = JSON.parse(conclusion) as { basics?: FormState; education?: Array<Record<string, string>>; experience?: Array<Record<string, string>>; projects?: Array<Record<string, string | string[]>>; skills?: string[] };
+      const basics = parsed.basics ?? {}; const education = Array.isArray(parsed.education) ? parsed.education : []; const experience = Array.isArray(parsed.experience) ? parsed.experience : []; const projects = Array.isArray(parsed.projects) ? parsed.projects : [];
+      if (education.length) setEducationEntries(education.map((item, index) => ({ id: `education-agent-${index}`, school: educationLabel(item), period: joinDistinct([item.start_date, item.end_date], " — "), detail: item.details ?? "" })));
+      if (projects.length) setProjectEntries(projects.map((item, index) => ({ id: `project-agent-${index}`, name: String(item.name ?? ""), period: [item.start_date, item.end_date].filter(Boolean).join(" — "), role: String(item.role ?? ""), detail: [item.description, ...(Array.isArray(item.outcomes) ? item.outcomes : [])].filter(Boolean).join("\n") })));
+      setValues((current) => ({ ...current, name: basics.name ?? current.name, email: basics.email ?? current.email, phone: basics.phone ?? current.phone, location: basics.location ?? current.location, role: basics.target_role ?? current.role, summary: basics.summary ?? current.summary, skills: (parsed.skills ?? []).join("、") || current.skills, work_company: experience.map((item) => [item.company, item.title].filter(Boolean).join(" · ")).join("\n") || current.work_company, work_detail: experience.map((item) => item.details).filter(Boolean).join("\n") || current.work_detail }));
+      setParseProgress(100); setUploadState("done"); setNotice("CV Extractor 已生成 ResumeProfile；网页字段映射交给 Form Filler Agent。");
+    } catch (error) { setParseProgress(100); setUploadState("done"); setNotice(error instanceof Error ? error.message : "Extractor 解析失败，请检查原始字段。"); }
   }
-
-  const refresh = useCallback(async (taskId: string) => {
-    const [nextTask, nextApprovals] = await Promise.all([
-      request<Task>(`/tasks/${taskId}`),
-      request<Approval[]>(`/tasks/${taskId}/approvals`),
-    ]);
-    setTask(nextTask);
-    setApprovals(nextApprovals);
-  }, []);
-  const pendingApproval = approvals.find((approval) => approval.status === "pending");
-
-  function fileKey(file: File) {
-    return `${file.name}:${file.size}:${file.lastModified}`;
-  }
-
-  async function addFiles(files: FileList | File[]) {
-    if (loading) return;
-    setFileError(null);
-    const incoming = Array.from(files);
-    const invalid = incoming.find((file) => {
-      const extension = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`;
-      return !ACCEPTED_EXTENSIONS.includes(extension) || file.size > MAX_FILE_BYTES;
-    });
-    if (invalid) {
-      const extension = `.${invalid.name.split(".").pop()?.toLowerCase() ?? ""}`;
-      setFileError(
-        !ACCEPTED_EXTENSIONS.includes(extension)
-          ? `不支持 ${extension || "该文件"}。请上传 PDF、Word、Excel 或文本文件。`
-          : `${invalid.name} 超过 200 KB 限制。`,
-      );
-      return;
-    }
-    const existing = new Set([
-      ...pendingFiles.map(fileKey),
-      ...uploadedFiles.map((file) => `${file.original_name ?? file.name}:${file.size}:uploaded`),
-    ]);
-    const selected = incoming.filter((file) => !existing.has(fileKey(file)));
-    if (selected.length === 0) return;
-
-    setPendingFiles((current) => [...current, ...selected]);
-    setLoading(true);
-    try {
-      const sessionId = await ensureSession();
-      let currentTask = task;
-      if (!currentTask) {
-        currentTask = await request<Task>("/tasks", {
-          method: "POST",
-          body: JSON.stringify({
-            user_goal: goal.trim() || "分析上传的资料",
-            session_id: sessionId,
-          }),
-        });
-        setTask(currentTask);
-      }
-      for (const file of selected) {
-        const key = fileKey(file);
-        setUploadingFiles((current) => [...current, key]);
-        try {
-          const formData = new FormData();
-          formData.append("file", file);
-          const uploaded = await request<UploadedFile>(`/tasks/${currentTask.id}/files`, {
-            method: "POST",
-            body: formData,
-          });
-          setUploadedFiles((current) => [...current, uploaded]);
-          setPendingFiles((current) => current.filter((item) => item !== file));
-        } finally {
-          setUploadingFiles((current) => current.filter((item) => item !== key));
-        }
-      }
-      await refresh(currentTask.id);
-    } catch (reason) {
-      setFileError(reason instanceof Error ? reason.message : "文件上传失败");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function removePendingFile(file: File) {
-    setPendingFiles((current) => current.filter((item) => item !== file));
-  }
-
-  async function streamTask(taskId: string, content: string, sessionId: string) {
-    const response = await fetch(`${API_BASE}/tasks/${taskId}/messages/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
-    });
-    if (!response.ok) {
-      throw new Error((await response.text()) || `请求失败：${response.status}`);
-    }
-    if (!response.body) throw new Error("服务器没有返回流式内容");
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-      const blocks = buffer.split("\n\n");
-      buffer = blocks.pop() ?? "";
-      for (const block of blocks) {
-        const eventName = block.match(/^event: (.+)$/m)?.[1];
-        const dataLine = block.match(/^data: (.+)$/m)?.[1];
-        if (!eventName || !dataLine) continue;
-        const data = JSON.parse(dataLine) as Record<string, unknown>;
-        if (eventName === "conclusion") {
-          setConclusion((current) => current + String(data.delta ?? ""));
-        } else if (eventName === "approval") {
-          // Approval details are shown in the dedicated approval panel.
-        } else if (eventName === "error") {
-          throw new Error(String(data.message ?? "Agent 执行失败"));
-        } else if (eventName === "done" && data.task) {
-          setTask(data.task as Task);
-        }
-      }
-      if (done) break;
-    }
-    await refresh(taskId);
-    const nextMessages = await request<ChatMessage[]>(`/sessions/${sessionId}/messages`);
-    setMessages(nextMessages);
-    setSessions(await request<Session[]>("/sessions"));
-  }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    const content = goal.trim();
-    if (!content || loading) return;
-    setLoading(true);
-    setError(null);
-    setConclusion("");
-    const displayContent = content;
-    const optimisticMessage: ChatMessage = {
-      id: `pending-${Date.now()}`,
-      role: "user",
-      content: displayContent,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((current) => [...current, optimisticMessage]);
-    setGoal("");
-    setPendingFiles([]);
-    setUploadedFiles([]);
-    try {
-      const sessionId = await ensureSession();
-      let currentTask = task;
-      if (!currentTask) {
-        currentTask = await request<Task>("/tasks", {
-          method: "POST",
-          body: JSON.stringify({ user_goal: content, session_id: sessionId }),
-        });
-        setTask(currentTask);
-      }
-      await streamTask(currentTask.id, displayContent, sessionId);
-    } catch (reason) {
-      setMessages((current) => current.filter((message) => message.id !== optimisticMessage.id));
-      setGoal(content);
-      setError(reason instanceof Error ? reason.message : "请求失败");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function resume(status: "approved" | "rejected") {
-    if (!task || loading) return;
-    setLoading(true);
-    setError(null);
-    try {
-      await request(`/tasks/${task.id}/resume`, {
-        method: "POST",
-        body: JSON.stringify({ status }),
-      });
-      await refresh(task.id);
-      await notify(status === "approved" ? "MacPilot 已继续" : "MacPilot 已停止", "审批结果已处理");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "审批处理失败");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function cancel() {
-    if (!task || loading) return;
-    setLoading(true);
-    setError(null);
-    try {
-      await request(`/tasks/${task.id}/cancel`, { method: "POST" });
-      await refresh(task.id);
-      await notify("MacPilot 任务已终止", "任务不会继续提交外部动作");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "终止任务失败");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <main className="app-shell">
-      <aside className="session-sidebar" aria-label="会话列表">
-        <div className="sidebar-brand">
-          <div>
-            <p className="eyebrow">LOCAL-FIRST AGENT</p>
-            <h1>MacPilot</h1>
-          </div>
-          <button type="button" className="new-session-button" onClick={() => void createNewSession()} disabled={loading} aria-label="新建会话" title="新建会话">＋</button>
-        </div>
-        <div className="sidebar-label">会话</div>
-        <nav className="session-list">
-          {sessions.length === 0 ? (
-            <p className="sidebar-empty">暂无会话<br />点击右上角 ＋ 新建</p>
-          ) : sessions.map((item) => (
-            <div className={`session-row${activeSessionId === item.id ? " session-row-active" : ""}`} key={item.id}>
-              <button
-                type="button"
-                className="session-item"
-                onClick={() => void selectSession(item.id)}
-                disabled={loading}
-              >
-                <span className="session-title">{item.title}</span>
-                <span className="session-date">{formatSessionDate(item.updated_at)}</span>
-              </button>
-              <button
-                type="button"
-                className="session-delete"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void deleteSession(item);
-                }}
-                disabled={loading}
-                aria-label={`删除会话 ${item.title}`}
-                title="删除会话"
-              >×</button>
-            </div>
-          ))}
-        </nav>
-      </aside>
-
-      <section className="workspace">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">当前会话</p>
-          <h1>{sessions.find((item) => item.id === activeSessionId)?.title ?? "未选择会话"}</h1>
-        </div>
-        <div className={`status status-${task?.status ?? "pending"}`} aria-live="polite">
-          <span className="status-dot" aria-hidden="true" />
-          {statusText[task?.status ?? "pending"]}
-        </div>
-      </header>
-
-      <section className="goal-panel" aria-labelledby="goal-title">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">任务</p>
-            <h2 id="goal-title">告诉 MacPilot 你要完成什么</h2>
-          </div>
-          {task && <span className="task-id">任务 {task.id.slice(0, 8)}</span>}
-        </div>
-        <form onSubmit={submit}>
-          <label className="sr-only" htmlFor="goal">任务目标</label>
-          <div
-            className={`composer${dragActive ? " composer-active" : ""}`}
-            onDragEnter={(event) => {
-              event.preventDefault();
-              setDragActive(true);
-            }}
-            onDragOver={(event) => event.preventDefault()}
-            onDragLeave={(event) => {
-              event.preventDefault();
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragActive(false);
-              void addFiles(event.dataTransfer.files);
-            }}
-          >
-            <textarea
-              id="goal"
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              placeholder="输入问题，或把资料拖到这里一起分析"
-              rows={3}
-              disabled={loading || task?.status === "cancelled"}
-            />
-            <input
-              id="file-input"
-              className="file-input"
-              type="file"
-              multiple
-              disabled={loading}
-              accept={ACCEPTED_EXTENSIONS.join(",")}
-              onChange={(event) => {
-                if (event.target.files) void addFiles(event.target.files);
-                event.currentTarget.value = "";
-              }}
-            />
-            {(pendingFiles.length > 0 || uploadedFiles.length > 0) && (
-              <ul className="composer-files" aria-label="已添加的资料">
-                {pendingFiles.map((file) => (
-                  <li key={`${file.name}:${file.lastModified}`} className="composer-file">
-                    <span className="file-chip-icon" aria-hidden="true">↗</span>
-                    <span className="composer-file-name">{file.name}</span>
-                    <small>{uploadingFiles.includes(fileKey(file)) ? "上传中…" : "等待上传"}</small>
-                    <button type="button" className="remove-file" onClick={() => removePendingFile(file)} disabled={uploadingFiles.includes(fileKey(file))} aria-label={`移除 ${file.name}`}>×</button>
-                  </li>
-                ))}
-                {uploadedFiles.map((file) => (
-                  <li key={file.path} className="composer-file composer-file-uploaded">
-                    <span className="file-chip-icon" aria-hidden="true">✓</span>
-                    <span className="composer-file-name">{file.original_name ?? file.name}</span>
-                    <small>已添加</small>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {fileError && <p className="field-error" role="alert">{fileError}</p>}
-            <div className="form-footer">
-              <div className="composer-tools">
-                <label className="upload-button" htmlFor="file-input" title="上传资料" aria-label="上传资料">
-                  <span aria-hidden="true">↑</span>
-                  <span className="sr-only">上传资料</span>
-                </label>
-                <span className="hint">拖入资料，或点击 ↑ 上传 · ⌘ + Enter 发送</span>
-              </div>
-              <button className="primary-button" type="submit" disabled={loading || !goal.trim() || task?.status === "cancelled"}>
-                {loading ? "处理中…" : task ? "发送" : "开始任务"}
-              </button>
-            </div>
-          </div>
-        </form>
-      </section>
-
-      {error && <p className="error-banner" role="alert">{error}</p>}
-
-      {messages.length > 0 && (
-        <section className="conversation-panel" aria-label="会话记录">
-          {messages.map((message) => (
-            <article key={message.id} className={`message message-${message.role}`}>
-              <span className="message-role">{message.role === "user" ? "你" : "MacPilot"}</span>
-              <p>{message.content}</p>
-            </article>
-          ))}
-        </section>
-      )}
-
-      {pendingApproval && (
-        <section className="approval-panel" aria-labelledby="approval-title">
-          <div className="approval-icon" aria-hidden="true">!</div>
-          <div className="approval-copy">
-            <p className="eyebrow">需要你的决定</p>
-            <h2 id="approval-title">任务准备执行高风险动作</h2>
-            <p>{pendingApproval.risk_reason}</p>
-            <details>
-              <summary>查看动作预览</summary>
-              <pre>{pendingApproval.preview}</pre>
-            </details>
-            <div className="approval-actions">
-              <button type="button" className="secondary-button" onClick={() => void resume("rejected")} disabled={loading}>拒绝并停止</button>
-              <button type="button" className="danger-button" onClick={() => void resume("approved")} disabled={loading}>批准继续</button>
-            </div>
-          </div>
-        </section>
-      )}
-
-      </section>
-    </main>
-  );
+  async function fillWebForm() { if (domainState !== "allowed" || !url || !uploadTaskId) { setWebState("error"); setNotice("请先上传简历并完成网址授权。"); return; } setWebState("running"); try { const response = await fetch(`${API_BASE}/tasks/${uploadTaskId}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: `请打开已授权的网址 ${url}，等待页面加载完成，识别网页表单字段，并使用已上传的简历内容填写表单草稿。只填写，不要点击最终提交按钮；完成后用普通中文汇报成功步骤、未填写字段和失败原因。` }) }); if (!response.ok) throw new Error(); setWebState("done"); setNotice("网页表单填写任务已完成，请回到目标网页检查草稿；Agent 不会自动提交。"); } catch { setWebState("error"); setNotice("网页填写失败，请确认网址已授权、API 服务正常且模型配置可用。"); } }
+  return <main className="resume-app">
+    <aside className="resume-nav"><div className="brand-mark"><span>CV</span><div><strong>Resume Lab</strong><small>Agent form workspace</small></div></div><div className="nav-label">简历字段</div><nav>{sections.map((section) => <button key={section.name} className={active === section.name ? "nav-item active" : "nav-item"} onClick={() => setActive(section.name)}><span>{section.icon}</span>{section.name}<em>{sectionProgress(section)}</em></button>)}</nav><div className="nav-foot"><span className="secure-dot" />本地草稿 · 不上传服务器</div></aside>
+    <section className="resume-main"><header className="resume-header"><div><p className="kicker">空白简历表单 <span>·</span> 本地工作区</p><h1>把经历，写成你的下一步。</h1><p className="header-copy">填写一份清晰、可预览的简历。Agent 可在获得域名授权后，通过浏览器识别并填写网页表单。</p></div><div className="header-actions"><button className="ghost-btn" onClick={clearAll}>清空内容</button><button className="primary-btn" onClick={generatePreview}>生成预览 <span>↗</span></button></div></header>
+    <div className="progress-line"><span><b>{filled}</b> 个字段已填写</span><span>{Math.round((filled / total) * 100)}%</span><i><b style={{ width: `${(filled / total) * 100}%` }} /></i></div>
+    <section className="upload-card"><div><p className="kicker">Import resume</p><h2>从已有简历开始</h2><p>上传 PDF、Word 或文本简历，Agent 会提取内容帮助你完成下面的字段。</p>{(uploadState === "parsing" || uploadState === "done") && <div className="parse-progress" aria-live="polite"><div className="parse-progress-top"><span>{uploadState === "done" ? "解析完成" : notice}</span><b>{parseProgress}%</b></div><div className="parse-track"><i style={{ width: `${parseProgress}%` }} /></div><div className="parse-steps"><span className={parseProgress >= 18 ? "step-active" : ""}>读取简历</span><span className={parseProgress >= 42 ? "step-active" : ""}>提取字段</span><span className={parseProgress >= 68 ? "step-active" : ""}>校验结果</span><span className={parseProgress >= 100 ? "step-active" : ""}>回填表单</span></div></div>}</div><input id="resume-upload" className="sr-only" type="file" accept=".pdf,.docx,.txt,.md" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadResume(file); event.currentTarget.value = ""; }} /><div className="upload-actions"><label className="ghost-btn upload-label" htmlFor="resume-upload">{uploadState === "uploading" ? "上传中…" : "选择简历文件"}</label>{uploadedFile && <span className="file-name">✓ {uploadedFile}</span>}{uploadState === "ready" && <button className="agent-btn parse-btn" onClick={() => void parseResume()}>解析并填入表单 <span>→</span></button>}</div></section>
+    <div className="workspace-grid"><div className="form-column"><section className="form-card"><div className="card-heading"><div className="section-glyph">{sections.find((item) => item.name === active)?.icon}</div><div><p className="kicker">当前部分</p><h2>{active}</h2></div></div>{active === "教育经历" ? <RepeatableEditor items={educationEntries} fields={[{ key: "school", label: "专业与学校", placeholder: "例如：交互设计 · 同济大学 · 硕士" }, { key: "period", label: "时间", placeholder: "例如：2021.09 — 2024.06" }, { key: "detail", label: "补充说明", placeholder: "课程、成绩或相关活动（可选）", wide: true }]} onChange={(id, key, value) => updateRepeat(educationEntries, setEducationEntries, id, key, value)} onAdd={() => setEducationEntries((items) => [...items, { id: `education-${Date.now()}`, school: "", period: "", detail: "" }])} onRemove={(id) => setEducationEntries((items) => items.filter((item) => item.id !== id))} /> : active === "项目经历" ? <RepeatableEditor items={projectEntries} fields={[{ key: "name", label: "项目名称", placeholder: "例如：企业协作平台 2.0" }, { key: "period", label: "项目时间", placeholder: "例如：2024.03 — 2024.08" }, { key: "role", label: "项目角色", placeholder: "例如：负责人 / 产品设计" }, { key: "detail", label: "项目介绍", placeholder: "目标、行动、结果与使用的工具或技术", wide: true }]} onChange={(id, key, value) => updateRepeat(projectEntries, setProjectEntries, id, key, value)} onAdd={() => setProjectEntries((items) => [...items, { id: `project-${Date.now()}`, name: "", period: "", role: "", detail: "" }])} onRemove={(id) => setProjectEntries((items) => items.filter((item) => item.id !== id))} /> : <div className="fields-grid">{sections.find((item) => item.name === active)?.fields.map((field) => <label className={field.wide ? "field wide" : "field"} key={field.key}><span>{field.label}</span>{field.wide ? <textarea value={values[field.key] ?? ""} onChange={(event) => update(field.key, event.target.value)} placeholder={field.placeholder} rows={4} /> : <input value={values[field.key] ?? ""} onChange={(event) => update(field.key, event.target.value)} placeholder={field.placeholder} />}</label>)}</div>}</section><p className="save-note"><span>✦</span> {notice}</p></div>
+    <aside className="agent-card"><div className="agent-heading"><span className="agent-icon">✳</span><div><p className="kicker">Browser agent</p><h3>让 Agent 帮你填写</h3></div><span className="live-pill">READY</span></div><p className="agent-copy">提交目标网址后，Agent 会先检查域名权限，再打开网页、识别字段并填写简历内容。</p><label className="url-label">目标网页地址<input value={url} onChange={(event) => { setUrl(event.target.value); setDomainState("idle"); setWebState("idle"); }} placeholder="https://example.com/resume" /></label><button className="agent-btn" onClick={() => void checkDomain()} disabled={!url || domainState === "checking"}>{domainState === "checking" ? "检查中…" : "检查访问权限"}<span>→</span></button>{domainState === "approval" && <div className="approval-box"><strong>需要你的授权</strong><p>发现网址 <code>{domain}</code> 尚未获得访问授权。是否允许 Agent 临时访问该精确域名并操作网页？</p><div><button className="ghost-btn" onClick={() => setDomainState("idle")}>暂不允许</button><button className="approve-btn" onClick={() => void approveDomain()}>允许访问</button></div></div>}{domainState === "allowed" && <><div className="allowed-box"><span>✓</span><div><strong>{domain}</strong><small>已授权 · 仅当前域名</small></div></div><button className="agent-btn fill-btn" onClick={() => void fillWebForm()} disabled={webState === "running" || !uploadTaskId}>{webState === "running" ? "正在打开并填写…" : webState === "done" ? "已完成草稿填写" : "打开网页并填写草稿"}<span>→</span></button>{!uploadTaskId && <p className="inline-error">请先上传简历，再开始网页填写。</p>}</>}{domainState === "error" && <p className="inline-error">只允许 HTTPS 地址，且需要权限服务在线。</p>}<div className="agent-steps"><span><b>01</b> 检查域名</span><span><b>02</b> 识别表单</span><span><b>03</b> 填写草稿</span></div></aside></div>
+    {preview && <section className="preview-card"><div className="preview-top"><div><p className="kicker">Preview</p><h2>{values.name || "你的姓名"}</h2><p>{values.role || "目标职位"} {values.location && ` · ${values.location}`}</p></div><button className="ghost-btn" onClick={() => setPreview(false)}>返回编辑</button></div><div className="preview-body">{sections.slice(1).map((section) => { const content = section.fields.map((field) => values[field.key]).filter(Boolean).join(" · "); return content ? <div className="preview-row" key={section.name}><strong>{section.name}</strong><p>{content}</p></div> : null })}</div>{missing.length > 0 && <p className="missing-note">未填写：{missing.join("、")}</p>}</section>}
+    </section></main>;
 }
-
-function formatBytes(value: number) {
-  return value < 1024 ? `${value} B` : `${(value / 1024).toFixed(1)} KB`;
-}
-
-function formatSessionDate(value: string) {
-  return new Date(value).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
-}
-
 export default App;

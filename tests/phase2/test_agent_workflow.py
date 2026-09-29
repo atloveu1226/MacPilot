@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
 
 from macpilot.core.config import Settings
@@ -88,3 +88,116 @@ def test_phase2_approval_interrupt_can_resume(tmp_path: Path) -> None:
     assert resumed["messages"][-1].content == "审批后完成"
     assert store.list_approvals(task_id)[0]["id"] == approval_id
     assert store.list_approvals(task_id)[0]["status"] == "approved"
+
+
+def test_resume_goal_uses_fast_extractor_path(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace=tmp_path / "workspace",
+        database_path=tmp_path / "macpilot.sqlite3",
+    )
+    store = SQLiteStore(settings.database_path)
+    session_id = store.create_session("简历测试")
+    task_id = store.create_task("读取上传的简历并提取信息", session_id=session_id)
+    upload_dir = settings.workspace / "uploads" / session_id
+    upload_dir.mkdir(parents=True)
+    (upload_dir / "resume.txt").write_text("张三\nzhang@example.com", encoding="utf-8")
+    model = FakeToolCallingModel(responses=[
+        '{"basics":{"name":"张三","email":"zhang@example.com"},"evidence":[{"field":"basics.name","value":"张三","source":"uploads/resume.txt","confidence":1.0}]}'
+    ])
+    workflow = build_agent_workflow(
+        settings,
+        audit_store=store,
+        task_id=task_id,
+        session_id=session_id,
+        model=model,
+    )
+
+    result = workflow.invoke(
+        {"messages": [HumanMessage(content="读取上传的简历并提取信息")]},
+        config={"configurable": {"thread_id": task_id}},
+    )
+
+    assert '"name": "张三"' in result["messages"][-1].content
+    assert [step["agent_name"] for step in store.list_steps(task_id)] == ["Resume Extractor"]
+
+
+def test_resume_extraction_with_form_negation_does_not_route_to_filler(tmp_path: Path) -> None:
+    settings = Settings(workspace=tmp_path / "workspace", database_path=tmp_path / "macpilot.sqlite3")
+    store = SQLiteStore(settings.database_path)
+    session_id = store.create_session("简历只提取")
+    task_id = store.create_task("只提取简历，不要填写任何网页表单", session_id=session_id)
+    upload_dir = settings.workspace / "uploads" / session_id
+    upload_dir.mkdir(parents=True)
+    (upload_dir / "resume.txt").write_text("张三\nzhang@example.com", encoding="utf-8")
+    model = FakeToolCallingModel(responses=[
+        '{"basics":{"name":"张三","email":"zhang@example.com"},"evidence":[{"field":"basics.name","value":"张三","source":"uploads/resume.txt","confidence":1.0}]}'
+    ])
+    workflow = build_agent_workflow(settings, audit_store=store, task_id=task_id, session_id=session_id, model=model)
+    workflow.invoke(
+        {"messages": [HumanMessage(content="只提取简历，不要填写任何网页表单")]},
+        config={"configurable": {"thread_id": task_id}},
+    )
+    assert [step["agent_name"] for step in store.list_steps(task_id)] == ["Resume Extractor"]
+
+
+def test_form_goal_uses_form_filler_after_resume_profile(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace=tmp_path / "workspace",
+        database_path=tmp_path / "macpilot.sqlite3",
+        allowed_browser_domains=("example.com",),
+    )
+    store = SQLiteStore(settings.database_path)
+    task_id = store.create_task("填写网页表单")
+    model = FakeToolCallingModel(responses=["已填写姓名和邮箱，未提交表单。"])
+    workflow = build_agent_workflow(
+        settings,
+        audit_store=store,
+        task_id=task_id,
+        model=model,
+    )
+
+    result = workflow.invoke(
+        {
+            "messages": [
+                AIMessage(content='{"basics":{"name":"张三","email":"zhang@example.com"}}'),
+                HumanMessage(content="请使用已上传的简历内容填写网页表单草稿，不要提交。"),
+            ]
+        },
+        config={"configurable": {"thread_id": task_id}},
+    )
+
+    assert result["messages"][-1].content == "已填写姓名和邮箱，未提交表单。"
+    assert [step["agent_name"] for step in store.list_steps(task_id)] == ["Form Filler"]
+
+
+def test_form_goal_chains_extractor_then_form_filler(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace=tmp_path / "workspace",
+        database_path=tmp_path / "macpilot.sqlite3",
+        allowed_browser_domains=("example.com",),
+    )
+    store = SQLiteStore(settings.database_path)
+    session_id = store.create_session("简历填表测试")
+    task_id = store.create_task("填写网页表单", session_id=session_id)
+    upload_dir = settings.workspace / "uploads" / session_id
+    upload_dir.mkdir(parents=True)
+    (upload_dir / "resume.txt").write_text("张三\nzhang@example.com", encoding="utf-8")
+    model = FakeToolCallingModel(responses=[
+        '{"basics":{"name":"张三","email":"zhang@example.com"},"evidence":[{"field":"basics.name","value":"张三","source":"uploads/resume.txt","confidence":1.0}]}',
+        "已完成网页字段映射和草稿填写，未提交表单。",
+    ])
+    workflow = build_agent_workflow(
+        settings,
+        audit_store=store,
+        task_id=task_id,
+        session_id=session_id,
+        model=model,
+    )
+
+    result = workflow.invoke(
+        {"messages": [HumanMessage(content="请使用上传的简历填写网页表单草稿，不要提交。")]},
+        config={"configurable": {"thread_id": task_id}},
+    )
+
+    assert result["messages"][-1].content == "已完成网页字段映射和草稿填写，未提交表单。"
+    assert [step["agent_name"] for step in store.list_steps(task_id)] == ["Resume Extractor", "Form Filler"]

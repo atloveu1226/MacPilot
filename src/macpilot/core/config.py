@@ -22,7 +22,7 @@ class Settings:
     browser_timeout_ms: int = 30_000
     browser_headless: bool = True
     browser_session_dir: Path = Path("./data/browser-sessions")
-    model_name: str = "qwen3.7-plus"
+    model_name: str = "qwen3.8-omni-flash"
     api_key: str | None = None
     base_url: str = "https://ws-0d9k5ksti6cnsfmd.cn-hongkong.maas.aliyuncs.com/compatible-mode/v1"
     database_path: Path = Path("./data/macpilot.sqlite3")
@@ -52,7 +52,7 @@ class Settings:
         browser_session_dir = Path(
             os.getenv("MACPILOT_BROWSER_SESSION_DIR", "./data/browser-sessions")
         )
-        model_name = os.getenv("QWEN_MODEL", "qwen3.7-plus")
+        model_name = os.getenv("QWEN_MODEL", "qwen3.8-omni-flash")
         api_key = os.getenv("DASHSCOPE_API_KEY")
         workspace_id = os.getenv("QWEN_WORKSPACE_ID")
         region = os.getenv("QWEN_REGION", "cn-beijing")

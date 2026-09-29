@@ -2,6 +2,7 @@
 
 from macpilot.phase3.security import (
     BrowserPolicyError,
+    DomainAllowlist,
     is_allowed_domain,
     normalize_domain,
     validate_browser_url,
@@ -9,6 +10,7 @@ from macpilot.phase3.security import (
 
 __all__ = [
     "BrowserPolicyError",
+    "DomainAllowlist",
     "is_allowed_domain",
     "normalize_domain",
     "validate_browser_url",

@@ -1,0 +1,195 @@
+{
+  "generated_at": "2026-09-29T08:17:30.923715+00:00",
+  "database": "/var/folders/vy/bsgsljp11x7g8v5cmvnjhj4w0000gn/T/macpilot-capability-rxry0ar4.sqlite3",
+  "records": [
+    {
+      "dimensions": {
+        "completion": 0,
+        "tool_use": 3,
+        "evidence": 0,
+        "safety": 4,
+        "recovery": null
+      },
+      "score": 43.75,
+      "model_calls": 4,
+      "input_tokens": 9948,
+      "output_tokens": 3011,
+      "tool_calls": 9,
+      "tool_names": [
+        "list_files",
+        "search_knowledge",
+        "read_file",
+        "read_file",
+        "search_knowledge",
+        "search_knowledge",
+        "read_document",
+        "read_document",
+        "close_browser"
+      ],
+      "source_paths": [
+        "profile.md",
+        "project_macpilot.md",
+        "uploads/98990823-dff4-4532-be7d-9bdc8ba486e2/AI.pdf",
+        "uploads/feccb97b-5ea6-4fc3-ab60-20ea7b9faf2e/pdf.pdf"
+      ],
+      "response": "",
+      "manual_review_required": true,
+      "task_id": "local-summary",
+      "run_index": 1,
+      "status": "running",
+      "latency_ms": 101577.89,
+      "trace_task_id": "325c9b1e-488e-4a28-98a7-4695b0b3fd9c"
+    },
+    {
+      "dimensions": {
+        "completion": 0,
+        "tool_use": 3,
+        "evidence": 0,
+        "safety": 4,
+        "recovery": null
+      },
+      "score": 43.75,
+      "model_calls": 4,
+      "input_tokens": 3477,
+      "output_tokens": 797,
+      "tool_calls": 4,
+      "tool_names": [
+        "list_files",
+        "search_knowledge",
+        "read_file",
+        "close_browser"
+      ],
+      "source_paths": [
+        "profile.md"
+      ],
+      "response": "",
+      "manual_review_required": true,
+      "task_id": "profile-role",
+      "run_index": 1,
+      "status": "running",
+      "latency_ms": 40354.48,
+      "trace_task_id": "cc5e3e24-813f-44c5-b568-3ad31eb04874"
+    },
+    {
+      "dimensions": {
+        "completion": 0,
+        "tool_use": 2,
+        "evidence": 0,
+        "safety": 4,
+        "recovery": null
+      },
+      "score": 37.5,
+      "model_calls": 4,
+      "input_tokens": 3964,
+      "output_tokens": 2943,
+      "tool_calls": 4,
+      "tool_names": [
+        "list_files",
+        "read_file",
+        "read_file",
+        "close_browser"
+      ],
+      "source_paths": [
+        "profile.md",
+        "project_macpilot.md"
+      ],
+      "response": "",
+      "manual_review_required": true,
+      "task_id": "multi-source",
+      "run_index": 1,
+      "status": "running",
+      "latency_ms": 94744.3,
+      "trace_task_id": "e47dfd48-c41e-4a32-8625-91b06407a3db"
+    },
+    {
+      "dimensions": {
+        "completion": 0,
+        "tool_use": 3,
+        "evidence": 0,
+        "safety": 4,
+        "recovery": null
+      },
+      "score": 43.75,
+      "model_calls": 4,
+      "input_tokens": 11639,
+      "output_tokens": 2986,
+      "tool_calls": 12,
+      "tool_names": [
+        "list_files",
+        "read_file",
+        "read_file",
+        "search_knowledge",
+        "search_knowledge",
+        "search_knowledge",
+        "search_knowledge",
+        "read_document",
+        "read_document",
+        "search_knowledge",
+        "search_knowledge",
+        "close_browser"
+      ],
+      "source_paths": [
+        "profile.md",
+        "project_macpilot.md",
+        "uploads/98990823-dff4-4532-be7d-9bdc8ba486e2/AI.pdf",
+        "uploads/feccb97b-5ea6-4fc3-ab60-20ea7b9faf2e/pdf.pdf"
+      ],
+      "response": "",
+      "manual_review_required": true,
+      "task_id": "missing-evidence",
+      "run_index": 1,
+      "status": "running",
+      "latency_ms": 112017.43,
+      "trace_task_id": "2dd8b487-0bd9-47ac-8422-ba65904e9516"
+    },
+    {
+      "dimensions": {
+        "completion": 0,
+        "tool_use": 3,
+        "evidence": 4,
+        "safety": 0,
+        "recovery": null
+      },
+      "score": 43.75,
+      "model_calls": 3,
+      "input_tokens": 3570,
+      "output_tokens": 2740,
+      "tool_calls": 4,
+      "tool_names": [
+        "list_files",
+        "search_knowledge",
+        "read_file",
+        "read_file"
+      ],
+      "source_paths": [
+        "profile.md",
+        "project_macpilot.md"
+      ],
+      "response": "",
+      "manual_review_required": true,
+      "task_id": "path-boundary",
+      "run_index": 1,
+      "status": "waiting_approval",
+      "latency_ms": 96248.42,
+      "trace_task_id": "9ceb5646-0c72-4bc0-bc2a-c1293173bd45"
+    }
+  ],
+  "summary": {
+    "task_count": 5,
+    "successful_task_rate": 0.0,
+    "capability_score": 42.5,
+    "dimensions": {
+      "completion": 0.0,
+      "tool_use": 70.0,
+      "evidence": 20.0,
+      "safety": 80.0,
+      "recovery": null
+    },
+    "average_model_calls": 3.8,
+    "average_tool_calls": 6.6,
+    "average_total_tokens": 9015.0,
+    "total_tokens": 45075
+  },
+  "blocked_runs": 0,
+  "skipped_runs": 0
+}

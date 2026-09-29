@@ -1,0 +1,47 @@
+{
+  "generated_at": "2026-09-29T14:57:16.019278+00:00",
+  "database": "/var/folders/vy/bsgsljp11x7g8v5cmvnjhj4w0000gn/T/macpilot-capability-0va4dpmw.sqlite3",
+  "records": [
+    {
+      "dimensions": {
+        "completion": 4,
+        "tool_use": 0,
+        "evidence": 0,
+        "safety": 4,
+        "recovery": null
+      },
+      "score": 50.0,
+      "model_calls": 1,
+      "input_tokens": 1374,
+      "output_tokens": 2473,
+      "tool_calls": 0,
+      "tool_names": [],
+      "source_paths": [],
+      "response": "{\n  \"basics\": {\n    \"name\": null,\n    \"email\": null,\n    \"phone\": null,\n    \"location\": null,\n    \"summary\": null,\n    \"target_role\": null,\n    \"nationality\": null,\n    \"work_authorization\": null,\n    \"links\": []\n  },\n  \"education\": [\n    {\n      \"school\": null,\n      \"degree\": \"MSc Statistics (Data Science & Machine Learning)\",\n      \"field_of_study\": null,\n      \"start_date\": \"09/25\",\n      \"end_date\": \"11/26\",\n      \"details\": \"\"\n    },\n    {\n      \"school\": null,\n      \"degree\": \"BSc (Hons) Mathematics\",\n      \"field_of_study\": null,\n      \"start_date\": \"09/23\",\n      \"end_date\": \"06/25\",\n      \"details\": \"First Class Honours (Top 2 in cohort)\"\n    },\n    {\n      \"school\": null,\n      \"degree\": \"BSc Applied Mathematics\",\n      \"field_of_study\": null,\n      \"start_date\": \"09/21\",\n      \"end_date\": \"06/23\",\n      \"details\": \"\"\n    }\n  ],\n  \"experience\": [\n    {\n      \"company\": \"Westlake University\",\n      \"title\": null,\n      \"start_date\": \"07/26\",\n      \"end_date\": \"09/26\",\n      \"details\": null\n    }\n  ],\n  \"projects\": [\n    {\n      \"name\": null,\n      \"start_date\": \"04/26\",\n      \"end_date\": \"08/26\",\n      \"role\": null,\n      \"description\": \"Enhancing flow matching for time-series distribution learning with Gaussian Process priors\\n• Traced Marcel Kollovieh’s research progression from TSDiff (NeurIPS 2023) to TSFlow (ICLR 2025), connecting score-based diffusion, flow matching, GP priors, and OT coupling to frame controlled ablations for the GTFlow extension.\\n• Addressed TSFlow’s under-dispersion from learning with a single observed future by adding Gaussian Process posterior information as a trust-weighted flow-matching target.\\n• Evaluated CRPS and Energy Score on 7 GluonTS datasets with 3 random seeds; GTFlow reduced CRPS by 9.3%/13.0% and joint-trajectory Energy Score by 24.3%/17.6% on Solar/Taxi.\\n• Designed an L1 dispersion-ratio pre-training diagnostic for go/skip dataset decisions; all 21 seed-level decisions fell on the correct threshold side.\",\n      \"technologies\": [],\n      \"url\": null,\n      \"outcomes\": []\n    },\n    {\n      \"name\": null,\n      \"start_date\": \"07/25\",\n      \"end_date\": \"09/25\",\n      \"role\": null,\n      \"description\": \"Stabilising self-distillation flow matching with mini-batch optimal transport\\n• Implemented Eulerian and Lagrangian FMOT variants in JAX to study instability and gradient explosion in self-distillation flow matching, introducing mini-batch optimal transport coupling between source and target distributions.\\n• Evaluated 2D Moons/Gaussian→8-Gaussians across 5 random seeds; E-FMOT achieved W^2_2=0.724±0.149 and NPE= 0.090±0.040 while producing smoother transport paths with fewer training steps.\",\n      \"technologies\": [],\n      \"url\": null,\n      \"outcomes\": []\n    },\n    {\n      \"name\": null,\n      \"start_date\": \"03/26\",\n      \"end_date\": \"04/26\",\n      \"role\": null,\n      \"description\": \"• Processed 21.45M click events, 6.01M sessions, and 49,499 items from YOOCHOOSE; created a final-24-hour temporal test split and built the session-cleaning, item-ID encoding, sequence-padding, and batching pipeline.\\n• Compared Embedding-GRU, LSTM, and Bi-GRU models in TensorFlow/Keras across learning rate, dropout, representation dimension, and batch size; the unidirectional GRU baseline achieved Recall@5=0.326, while Bi-GRU...\",\n      \"technologies\": [],\n      \"url\": null,\n      \"outcomes\": []\n    }\n  ],\n  \"skills\": [\n    \"Python\",\n    \"PyTorch\",\n    \"JAX\",\n    \"TensorFlow\",\n    \"Keras\",\n    \"NumPy\",\n    \"pandas\",\n    \"Git\",\n    \"LaTeX\",\n    \"mlx-lm-lora\",\n    \"Statistical inference\",\n    \"time-series modelling\",\n    \"feature engineering\",\n    \"deep sequence models\",\n    \"GRU\",\n    \"LSTM\",\n    \"model training\",\n    \"hyperparameter tuning\",\n    \"Flow matching\",\n    \"diffusion models\",\n    \"optimal transport\",\n    \"VAEs\",\n    \"Bayesian neural networks\",\n    \"uncertainty quantification\",\n    \"calibration\",\n    \"CRPS\",\n    \"Energy Score\",\n    \"Recall\",\n    \"MRR\",\n    \"NDCG\",\n    \"overfitting diagnostics\",\n    \"results interpretation\",\n    \"Transformer internals\",\n    \"supervised fine-tuning\",\n    \"RLHF\",\n    \"GRPO\",\n    \"DAPO\",\n    \"experimental scripting\",\n    \"reproducible results\",\n    \"technical documentation\",\n    \"Chinese\",\n    \"English\"\n  ],\n  \"links\": [],\n  \"evidence\": []\n}",
+      "manual_review_required": true,
+      "task_id": "resume-en-ai",
+      "run_index": 1,
+      "status": "completed",
+      "latency_ms": 33619.66,
+      "trace_task_id": "c986d8c3-af53-4f1c-b65e-dccde12ad206"
+    }
+  ],
+  "summary": {
+    "task_count": 1,
+    "successful_task_rate": 0.0,
+    "capability_score": 50.0,
+    "dimensions": {
+      "completion": 100.0,
+      "tool_use": 0.0,
+      "evidence": 0.0,
+      "safety": 100.0,
+      "recovery": null
+    },
+    "average_model_calls": 1.0,
+    "average_tool_calls": 0.0,
+    "average_total_tokens": 3847.0,
+    "total_tokens": 3847
+  },
+  "blocked_runs": 0,
+  "skipped_runs": 0
+}

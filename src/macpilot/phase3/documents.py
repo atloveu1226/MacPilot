@@ -19,6 +19,48 @@ from macpilot.phase1.filesystem import (
 DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xlsm", *TEXT_EXTENSIONS}
 
 
+def _join_pdf_spans(spans: list[dict[str, Any]]) -> str:
+    """Join spans without inserting spaces into Chinese text unnecessarily."""
+    result = ""
+    for span in spans:
+        value = str(span.get("text", "")).strip()
+        if not value:
+            continue
+        if result and result[-1].isascii() and value[0].isascii() and result[-1].isalnum() and value[0].isalnum():
+            result += " "
+        result += value
+    return result.strip()
+
+
+def _extract_pdf_layout_text(path: Path) -> str:
+    """Rebuild PDF text in visual line order while preserving paragraph breaks.
+
+    Plain ``page.get_text()`` follows the PDF's internal object order, which can
+    interleave columns or place a date before its school. The dict representation
+    exposes blocks, lines, and spans after PyMuPDF's visual sorting.
+    """
+    import fitz
+
+    pages: list[str] = []
+    with fitz.open(path) as document:
+        for page_number, page in enumerate(document, start=1):
+            layout = page.get_text("dict", sort=True)
+            blocks: list[str] = []
+            for block in layout.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                lines: list[str] = []
+                for line in block.get("lines", []):
+                    text = _join_pdf_spans(line.get("spans", []))
+                    if text:
+                        lines.append(text)
+                if lines:
+                    blocks.append("\n".join(lines))
+            if blocks:
+                pages.append("\n\n".join(blocks))
+    return "\n\n".join(pages)
+
+
 def _check_document(path: Path, settings: Settings, relative_path: str) -> dict[str, Any] | None:
     if not path.is_file():
         return {"ok": False, "error": f"File not found: {relative_path}"}
@@ -35,10 +77,7 @@ def extract_document(path: Path, max_file_bytes: int) -> str:
     if suffix in TEXT_EXTENSIONS:
         return path.read_text(encoding="utf-8")
     if suffix == ".pdf":
-        import fitz
-
-        with fitz.open(path) as document:
-            return "\n\n".join(page.get_text() for page in document)
+        return _extract_pdf_layout_text(path)
     if suffix == ".docx":
         from docx import Document
 

@@ -21,6 +21,10 @@ description: Extract structured personal information and project experience from
 6. 同一信息在多个来源出现时合并去重，并保留相关证据。
 7. 不把课程、普通活动或工作经历误归类为项目，除非原文明确将其作为项目描述。
 8. 每个已提取的重要字段都记录来源、位置和置信度。
+9. PDF 中的换行必须结合版面判断：同一条经历的职责、成果和技术栈可以保留为多行；只有识别到新的标题、日期、机构或明显的垂直间距时，才创建新条目。
+10. 不要使用“每一行对应一个条目”的规则。PDF 的内部文本顺序可能与视觉顺序不同，必须以版面分组后的内容为准。
+11. 教育经历中，学校、学位、专业和时间属于同一个条目；如果日期出现在学校前后，先将它与最近的学校/学位候选配对，不要把日期单独创建成学校。
+12. 项目经历中，项目名称、时间、角色、描述、技术和成果属于同一个条目；描述中的项目符号或换行不能拆成多个项目。
 
 ## Personal Information
 
@@ -55,7 +59,7 @@ description: Extract structured personal information and project experience from
 
 ## Output Contract
 
-只返回 JSON，不要返回 Markdown 代码围栏或额外解释：
+只返回 JSON，不要返回 Markdown 代码围栏或额外解释。教育经历、工作经历和项目经历必须保持数组结构；每一条经历必须是独立对象，不能把多条经历拼接到同一个字符串中：
 
 ```json
 {
@@ -70,6 +74,25 @@ description: Extract structured personal information and project experience from
     "work_authorization": null,
     "links": []
   },
+  "education": [
+    {
+      "school": null,
+      "degree": null,
+      "field_of_study": null,
+      "start_date": null,
+      "end_date": null,
+      "details": null
+    }
+  ],
+  "experience": [
+    {
+      "company": null,
+      "title": null,
+      "start_date": null,
+      "end_date": null,
+      "details": null
+    }
+  ],
   "projects": [
     {
       "name": null,
@@ -82,6 +105,7 @@ description: Extract structured personal information and project experience from
       "outcomes": []
     }
   ],
+  "skills": [],
   "evidence": [
     {
       "field": "projects[0].role",
@@ -96,6 +120,17 @@ description: Extract structured personal information and project experience from
 ```
 
 没有提取到的列表返回 `[]`，没有提取到的单值字段返回 `null`。
+
+## Entry Boundary Rules
+
+在结构化输出前，按以下优先级判断是否开始新条目：
+
+1. 新的章节标题。
+2. 新的日期范围，并且附近出现新的学校、公司或项目名称。
+3. 新的加粗/大字号标题或明显的版面分隔。
+4. 只有在以上线索都不存在时，才把连续文本保留在当前条目的 `details`、`description` 或 `outcomes` 中。
+
+如果条目边界无法确定，保留原文、降低 `confidence`，并在 `evidence.reason` 中说明，不要擅自拆分或合并。
 
 ## Evidence and Confidence
 
