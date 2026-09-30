@@ -550,6 +550,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "step_id": step_id,
                 "response": "任务暂停，等待人工审批。",
                 "interrupts": interruptions,
+                "form_mapping": result.get("form_mapping"),
             }
 
         if get_task_or_404(task_id).status == "cancelled":
@@ -558,6 +559,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "task": _task_dict(get_task_or_404(task_id)),
                 "step_id": step_id,
                 "response": "任务已终止。",
+                "form_mapping": result.get("form_mapping"),
             }
 
         response = result["messages"][-1].content
@@ -579,6 +581,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "task": _task_dict(get_task_or_404(task_id)),
             "step_id": step_id,
             "response": response,
+            "form_mapping": result.get("form_mapping"),
         }
 
     def _thinking_message(event: dict[str, Any]) -> str | None:
@@ -591,6 +594,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Researcher": "正在检索和分析相关资料",
                 "Critic": "正在核对证据和结果质量",
                 "Finalizer": "正在整理最终结论",
+                "Resume Extractor": "正在读取简历并提取 ResumeProfile",
+                "Resume Form Filler": "正在根据 ResumeProfile 回填本地表单",
                 "Approval Gate": "正在确认是否需要你的批准",
                 "Executor": "正在执行已批准的外部操作",
             }.get(str(payload.get("agent_name")), "正在处理任务")

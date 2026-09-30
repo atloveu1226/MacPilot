@@ -23,14 +23,16 @@ FastAPI、LangGraph、React/Tauri、SQLite 和 Playwright，把简历读取、�
 CV Extractor
    │  ResumeProfile + evidence
    ▼
-字段校验与映射
+Resume Form Filler
    │
-   ├── 本地简历工作区：回填基本信息、教育、工作和项目经历
+   ├── 本地简历工作区：按 ResumeProfile 条目数量生成并回填字段
    │
    └── 外部网页表单：Form Filler → inspect_form → 动态创建字段 → 填写草稿
 ```
 
-`Form Filler` 只使用上一阶段的 `ResumeProfile`，不能自行补造内容，也不会点击最终提交按钮。
+本地表单和外部网页表单是两个不同节点：`Resume Form Filler` 只负责结构化字段映射，
+`Form Filler` 负责浏览器交互。两者都只使用上一阶段的 `ResumeProfile`，不能自行补造内容，
+也不会点击最终提交按钮。
 
 ## 项目结构
 

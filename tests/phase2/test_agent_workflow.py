@@ -201,3 +201,27 @@ def test_form_goal_chains_extractor_then_form_filler(tmp_path: Path) -> None:
 
     assert result["messages"][-1].content == "已完成网页字段映射和草稿填写，未提交表单。"
     assert [step["agent_name"] for step in store.list_steps(task_id)] == ["Resume Extractor", "Form Filler"]
+
+
+def test_local_form_goal_chains_extractor_then_resume_form_filler(tmp_path: Path) -> None:
+    settings = Settings(workspace=tmp_path / "workspace", database_path=tmp_path / "macpilot.sqlite3")
+    store = SQLiteStore(settings.database_path)
+    session_id = store.create_session("本地简历表单测试")
+    task_id = store.create_task("解析并回填本地简历表单", session_id=session_id)
+    upload_dir = settings.workspace / "uploads" / session_id
+    upload_dir.mkdir(parents=True)
+    (upload_dir / "resume.txt").write_text("张三\nzhang@example.com", encoding="utf-8")
+    model = FakeToolCallingModel(responses=[
+        '{"basics":{"name":"张三","email":"zhang@example.com"},"evidence":[{"field":"basics.name","value":"张三","source":"uploads/resume.txt","confidence":1.0}]}',
+        '{"basics":{"name":"张三","email":"zhang@example.com"},"education_entries":[],"work":{"company":"","period":"","detail":""},"project_entries":[]}',
+    ])
+    workflow = build_agent_workflow(settings, audit_store=store, task_id=task_id, session_id=session_id, model=model)
+
+    result = workflow.invoke(
+        {"messages": [HumanMessage(content="请解析简历并回填本地简历表单")]},
+        config={"configurable": {"thread_id": task_id}},
+    )
+
+    assert '"form_mapping"' in result["messages"][-1].content
+    assert result["form_mapping"]["basics"]["name"] == "张三"
+    assert [step["agent_name"] for step in store.list_steps(task_id)] == ["Resume Extractor", "Resume Form Filler"]

@@ -58,6 +58,7 @@ def test_interactive_browser_tools_are_allowlisted_and_non_submitting(tmp_path: 
         "fetch_page",
         "open_page",
         "inspect_form",
+        "add_form_entries",
         "request_domain_access",
         "fill_form",
         "save_form_draft",

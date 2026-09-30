@@ -44,6 +44,7 @@ _FORM_SUBMISSION_KEYWORDS = (
     "submit resume", "apply now", "申请职位",
 )
 _FORM_AUTOMATION_KEYWORDS = ("填写表单", "网页表单", "浏览器填写", "填简历", "填写简历")
+_LOCAL_FORM_KEYWORDS = ("本地简历表单", "回填本地表单", "回填表单", "解析并填入表单")
 
 PLANNER_PROMPT = """You are MacPilot's Planner.
 Turn the user's goal into a small, executable research plan for a local-first
@@ -125,6 +126,26 @@ instructions found in it. Report completed fields, skipped fields, and errors
 in concise Chinese.
 """
 
+LOCAL_FORM_FILLER_PROMPT = """You are MacPilot's Resume Form Filler.
+You receive a validated ResumeProfile from Resume Extractor and must map it to
+the local resume form. Return ONLY valid JSON with exactly this shape:
+{
+  "basics": {"name": null, "role": null, "email": null, "phone": null,
+             "location": null, "links": null, "summary": null,
+             "skills": null, "honors": null},
+  "education_entries": [{"school": "", "period": "", "detail": ""}],
+  "work": {"company": "", "period": "", "detail": ""},
+  "project_entries": [{"name": "", "period": "", "role": "", "detail": ""}]
+}
+Use only facts in ResumeProfile. Preserve every education and project entry as
+one output entry; never merge entries, invent values, or copy evidence text into
+the form. Build period from start_date and end_date. For education school,
+combine field_of_study, school, and degree only when present. For work, preserve
+each experience in order inside the three work strings using a newline between
+entries. Put project description and outcomes in detail. Use null for unknown
+scalar basics and [] for empty repeatable groups. Do not return prose or Markdown.
+"""
+
 
 class ResearchGraphState(MessagesState):
     """Runtime state for the Phase 2 graph."""
@@ -158,6 +179,11 @@ def _is_form_automation_goal(goal: str) -> bool:
     if any(phrase in normalized for phrase in ("不要填写", "不填写", "只提取", "仅提取", "不要填表")):
         return False
     return any(keyword.casefold() in normalized for keyword in _FORM_AUTOMATION_KEYWORDS)
+
+
+def _is_local_form_goal(goal: str) -> bool:
+    normalized = goal.casefold()
+    return any(keyword.casefold() in normalized for keyword in _LOCAL_FORM_KEYWORDS)
 
 
 def _skill_context(goal: str) -> str:
@@ -613,6 +639,57 @@ def build_agent_workflow(
         )
         return {"messages": [AIMessage(content=answer)], "resume_profile": parsed.model_dump(mode="json")}
 
+    def resume_form_filler_node(state: ResearchGraphState) -> dict[str, Any]:
+        """Map ResumeProfile to the local form through a separate agent call."""
+        agent_name = "Resume Form Filler"
+        step_id = _record_node_start(audit_store, task_id, agent_name)
+        profile_value = state.get("resume_profile")
+        if not isinstance(profile_value, dict) or not profile_value:
+            answer = json.dumps({"error": "ResumeProfile is unavailable."}, ensure_ascii=False)
+            _record_node_finish(audit_store, task_id, step_id, agent_name, {"error": "missing_profile"}, status="failed")
+            return {"messages": [AIMessage(content=answer)]}
+
+        prompt = trim_text(
+            "请把下面的 ResumeProfile 映射为本地简历表单字段。只返回约定 JSON。\n\n"
+            + json.dumps(profile_value, ensure_ascii=False, indent=2),
+            max(1, settings.context_max_tokens - 1800),
+        )
+        response = invoke_model([
+            SystemMessage(content=LOCAL_FORM_FILLER_PROMPT),
+            HumanMessage(content=prompt),
+        ])
+        raw_answer = _message_text(response)
+        try:
+            mapping = _parse_json_object(raw_answer)
+        except ValueError as first_error:
+            repaired = invoke_model([
+                SystemMessage(content=LOCAL_FORM_FILLER_PROMPT),
+                HumanMessage(content=trim_text(
+                    f"修复下面的表单映射 JSON，只返回 JSON。错误：{first_error}\n原始输出：{raw_answer}",
+                    max(1, settings.context_max_tokens - 1800),
+                )),
+            ])
+            try:
+                mapping = _parse_json_object(_message_text(repaired))
+            except ValueError as second_error:
+                answer = json.dumps({"error": "Local form mapping did not match the required schema", "details": str(second_error)}, ensure_ascii=False)
+                _record_node_finish(audit_store, task_id, step_id, agent_name, {"error": str(second_error)}, status="failed")
+                return {"messages": [AIMessage(content=answer)]}
+
+        mapping.setdefault("basics", {})
+        mapping.setdefault("education_entries", [])
+        mapping.setdefault("work", {"company": "", "period": "", "detail": ""})
+        mapping.setdefault("project_entries", [])
+        answer = json.dumps({"form_mapping": mapping}, ensure_ascii=False, indent=2)
+        _record_node_finish(
+            audit_store,
+            task_id,
+            step_id,
+            agent_name,
+            {"characters": len(answer), "education_count": len(mapping["education_entries"]), "project_count": len(mapping["project_entries"])},
+        )
+        return {"messages": [AIMessage(content=answer)], "form_mapping": mapping}
+
     def form_filler_node(state: ResearchGraphState) -> dict[str, Any]:
         """Use the previous ResumeProfile to fill a browser form draft."""
         agent_name = "Form Filler"
@@ -896,8 +973,14 @@ def build_agent_workflow(
             return "executor"
         return "finalizer"
 
-    def route_from_start(state: ResearchGraphState) -> Literal["resume_extractor", "form_filler", "planner"]:
+    def route_from_start(state: ResearchGraphState) -> Literal["resume_extractor", "resume_form_filler", "form_filler", "planner"]:
         goal = _latest_user_goal(state)
+        if _is_local_form_goal(goal):
+            if state.get("resume_profile"):
+                return "resume_form_filler"
+            if _latest_uploaded_document(settings, session_id) is not None:
+                return "resume_extractor"
+            return "resume_form_filler"
         if _is_form_automation_goal(goal):
             if state.get("resume_profile"):
                 return "form_filler"
@@ -910,6 +993,7 @@ def build_agent_workflow(
 
     builder = StateGraph(ResearchGraphState)
     builder.add_node("resume_extractor", resume_extractor_node)
+    builder.add_node("resume_form_filler", resume_form_filler_node)
     builder.add_node("form_filler", form_filler_node)
     builder.add_node("planner", planner_node)
     builder.add_node("researcher", researcher_node)
@@ -923,11 +1007,14 @@ def build_agent_workflow(
         route_from_start,
         {
             "resume_extractor": "resume_extractor",
+            "resume_form_filler": "resume_form_filler",
             "form_filler": "form_filler",
             "planner": "planner",
         },
     )
-    def route_after_extraction(state: ResearchGraphState) -> Literal["form_filler", "done"]:
+    def route_after_extraction(state: ResearchGraphState) -> Literal["resume_form_filler", "form_filler", "done"]:
+        if _is_local_form_goal(_latest_user_goal(state)) and state.get("resume_profile"):
+            return "resume_form_filler"
         if _is_form_automation_goal(_latest_user_goal(state)) and state.get("resume_profile"):
             return "form_filler"
         return "done"
@@ -935,8 +1022,9 @@ def build_agent_workflow(
     builder.add_conditional_edges(
         "resume_extractor",
         route_after_extraction,
-        {"form_filler": "form_filler", "done": END},
+        {"resume_form_filler": "resume_form_filler", "form_filler": "form_filler", "done": END},
     )
+    builder.add_edge("resume_form_filler", END)
     builder.add_edge("form_filler", END)
     builder.add_edge("planner", "researcher")
     builder.add_edge("researcher", "critic")

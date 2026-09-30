@@ -77,7 +77,7 @@ function App() {
     if (!uploadTaskId) return;
     setUploadState("parsing"); setParseProgress(8); setNotice("CV Extractor 正在读取简历…");
     try {
-      const response = await fetch(`${API_BASE}/tasks/${uploadTaskId}/messages/stream`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "请使用 CV Extractor 读取上传的简历，只输出 ResumeProfile。" }) });
+      const response = await fetch(`${API_BASE}/tasks/${uploadTaskId}/messages/stream`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: "请先使用 CV Extractor 读取上传的简历，再由 Resume Form Filler 根据 ResumeProfile 回填本地简历表单。只返回 FORM_FILL_RESULT JSON，不要填写网页。" }) });
       if (!response.ok || !response.body) throw new Error("Extractor 请求失败");
       const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let conclusion = "";
       while (true) {
@@ -86,18 +86,29 @@ function App() {
         for (const block of blocks) {
           const event = block.match(/^event: (.+)$/m)?.[1]; const dataLine = block.match(/^data: (.+)$/m)?.[1]; if (!event || !dataLine) continue;
           const data = JSON.parse(dataLine) as Record<string, unknown>;
-          if (event === "thinking") { setNotice(String(data.message ?? "CV Extractor 正在处理…")); setParseProgress(42); }
+          if (event === "thinking") { setNotice(String(data.message ?? "Agent 正在处理…")); setParseProgress(42); }
           if (event === "conclusion") { conclusion += String(data.delta ?? ""); setParseProgress(84); }
           if (event === "error") throw new Error(String(data.message ?? "Extractor 解析失败"));
         }
         if (done) break;
       }
-      const parsed = JSON.parse(conclusion) as { basics?: FormState; education?: Array<Record<string, string>>; experience?: Array<Record<string, string>>; projects?: Array<Record<string, string | string[]>>; skills?: string[] };
-      const basics = parsed.basics ?? {}; const education = Array.isArray(parsed.education) ? parsed.education : []; const experience = Array.isArray(parsed.experience) ? parsed.experience : []; const projects = Array.isArray(parsed.projects) ? parsed.projects : [];
-      if (education.length) setEducationEntries(education.map((item, index) => ({ id: `education-agent-${index}`, school: educationLabel(item), period: joinDistinct([item.start_date, item.end_date], " — "), detail: item.details ?? "" })));
-      if (projects.length) setProjectEntries(projects.map((item, index) => ({ id: `project-agent-${index}`, name: String(item.name ?? ""), period: [item.start_date, item.end_date].filter(Boolean).join(" — "), role: String(item.role ?? ""), detail: [item.description, ...(Array.isArray(item.outcomes) ? item.outcomes : [])].filter(Boolean).join("\n") })));
-      setValues((current) => ({ ...current, name: basics.name ?? current.name, email: basics.email ?? current.email, phone: basics.phone ?? current.phone, location: basics.location ?? current.location, role: basics.target_role ?? current.role, summary: basics.summary ?? current.summary, skills: (parsed.skills ?? []).join("、") || current.skills, work_company: experience.map((item) => [item.company, item.title].filter(Boolean).join(" · ")).join("\n") || current.work_company, work_detail: experience.map((item) => item.details).filter(Boolean).join("\n") || current.work_detail }));
-      setParseProgress(100); setUploadState("done"); setNotice("CV Extractor 已生成 ResumeProfile；网页字段映射交给 Form Filler Agent。");
+      const parsed = JSON.parse(conclusion) as { form_mapping?: { basics?: FormState; education_entries?: Array<Record<string, string>>; work?: Record<string, string>; project_entries?: Array<Record<string, string>> }; basics?: FormState; education?: Array<Record<string, string>>; experience?: Array<Record<string, string>>; projects?: Array<Record<string, string | string[]>>; skills?: string[] };
+      const mapping = parsed.form_mapping;
+      if (mapping) {
+        const basics = mapping.basics ?? {};
+        const education = Array.isArray(mapping.education_entries) ? mapping.education_entries : [];
+        const projects = Array.isArray(mapping.project_entries) ? mapping.project_entries : [];
+        setEducationEntries(education.map((item, index) => ({ id: `education-agent-${index}`, school: String(item.school ?? ""), period: String(item.period ?? ""), detail: String(item.detail ?? "") })));
+        setProjectEntries(projects.map((item, index) => ({ id: `project-agent-${index}`, name: String(item.name ?? ""), period: String(item.period ?? ""), role: String(item.role ?? ""), detail: String(item.detail ?? "") })));
+        setValues((current) => ({ ...current, name: basics.name ?? current.name, email: basics.email ?? current.email, phone: basics.phone ?? current.phone, location: basics.location ?? current.location, role: basics.role ?? current.role, links: basics.links ?? current.links, summary: basics.summary ?? current.summary, skills: basics.skills ?? current.skills, honors: basics.honors ?? current.honors, work_company: mapping.work?.company ?? current.work_company, work_period: mapping.work?.period ?? current.work_period, work_detail: mapping.work?.detail ?? current.work_detail }));
+        setParseProgress(100); setUploadState("done"); setNotice("CV Extractor + Resume Form Filler 已完成本地表单回填。");
+      } else {
+        const basics = parsed.basics ?? {}; const education = Array.isArray(parsed.education) ? parsed.education : []; const experience = Array.isArray(parsed.experience) ? parsed.experience : []; const projects = Array.isArray(parsed.projects) ? parsed.projects : [];
+        if (education.length) setEducationEntries(education.map((item, index) => ({ id: `education-agent-${index}`, school: educationLabel(item), period: joinDistinct([item.start_date, item.end_date], " — "), detail: item.details ?? "" })));
+        if (projects.length) setProjectEntries(projects.map((item, index) => ({ id: `project-agent-${index}`, name: String(item.name ?? ""), period: [item.start_date, item.end_date].filter(Boolean).join(" — "), role: String(item.role ?? ""), detail: [item.description, ...(Array.isArray(item.outcomes) ? item.outcomes : [])].filter(Boolean).join("\n") })));
+        setValues((current) => ({ ...current, name: basics.name ?? current.name, email: basics.email ?? current.email, phone: basics.phone ?? current.phone, location: basics.location ?? current.location, role: basics.target_role ?? current.role, summary: basics.summary ?? current.summary, skills: (parsed.skills ?? []).join("、") || current.skills, work_company: experience.map((item) => [item.company, item.title].filter(Boolean).join(" · ")).join("\n") || current.work_company, work_detail: experience.map((item) => item.details).filter(Boolean).join("\n") || current.work_detail }));
+        setParseProgress(100); setUploadState("done"); setNotice("已兼容旧版 ResumeProfile 输出；建议重新解析以使用双 Agent 回填。");
+      }
     } catch (error) { setParseProgress(100); setUploadState("done"); setNotice(error instanceof Error ? error.message : "Extractor 解析失败，请检查原始字段。"); }
   }
   async function fillWebForm() { if (domainState !== "allowed" || !url || !uploadTaskId) { setWebState("error"); setNotice("请先上传简历并完成网址授权。"); return; } setWebState("running"); try { const response = await fetch(`${API_BASE}/tasks/${uploadTaskId}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: `请打开已授权的网址 ${url}，等待页面加载完成，识别网页表单字段，并使用已上传的简历内容填写表单草稿。只填写，不要点击最终提交按钮；完成后用普通中文汇报成功步骤、未填写字段和失败原因。` }) }); if (!response.ok) throw new Error(); setWebState("done"); setNotice("网页表单填写任务已完成，请回到目标网页检查草稿；Agent 不会自动提交。"); } catch { setWebState("error"); setNotice("网页填写失败，请确认网址已授权、API 服务正常且模型配置可用。"); } }
