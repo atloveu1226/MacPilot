@@ -243,7 +243,7 @@ def make_browser_tools(
             )
             browser_state["fields"] = {item["key"]: item for item in fields}
             login_fields = [
-                {key: item["key"], label: item.get("label") or item.get("name") or item.get("id") or item["key"], type: item.get("type")}
+                {"key": item["key"], "label": item.get("label") or item.get("name") or item.get("id") or item["key"], "type": item.get("type")}
                 for item in fields if item.get("sensitive")
             ]
             page_identity = f"{page.url} {page.title()}".lower()
@@ -268,7 +268,7 @@ def make_browser_tools(
                 "message": (
                     "检测到账号或密码字段。请在当前浏览器窗口手动完成登录，"
                     "Agent 不会读取或填写账号密码。登录完成后再继续填写简历表单。"
-                    if login_fields else "未检测到登录凭据字段。"
+                    if login_fields or login_page else "未检测到登录凭据字段。"
                 ),
             }
 
