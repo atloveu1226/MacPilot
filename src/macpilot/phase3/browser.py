@@ -194,6 +194,15 @@ def make_browser_tools(
             if context is None:
                 context = _launch_context()
             page = context.pages[0] if context.pages else context.new_page()
+            # Never reload an already-open page during one agent run. A model
+            # retry must not interrupt a user who is typing a login code.
+            if browser_state.get("page") is not None and not page.is_closed():
+                return {
+                    "ok": True,
+                    "url": page.url,
+                    "title": page.title(),
+                    "message": "页面已保持打开，禁止重复导航；请继续当前页面上的人工操作。",
+                }
             page.goto(validated_url, wait_until="domcontentloaded", timeout=settings.browser_timeout_ms)
             browser_state["page"] = page
             return {
@@ -220,7 +229,7 @@ def make_browser_tools(
                     const type = (el.getAttribute('type') || el.tagName).toLowerCase();
                     const identity = [el.getAttribute('name') || '', el.id || '', label,
                       el.getAttribute('placeholder') || ''].join(' ').toLowerCase();
-                    const sensitive = type === 'password' || /(password|passwd|pwd|username|user|account|login|账号|密码|用户名|登录)/i.test(identity);
+                    const sensitive = type === 'password' || /(password|passwd|pwd|username|user|account|login|phone|mobile|captcha|verification|otp|账号|密码|用户名|登录|手机号|验证码|验证)/i.test(identity);
                     const key = `field_${index}`;
                     return {
                       key, index, tag: el.tagName.toLowerCase(), type,
@@ -237,7 +246,9 @@ def make_browser_tools(
                 {key: item["key"], label: item.get("label") or item.get("name") or item.get("id") or item["key"], type: item.get("type")}
                 for item in fields if item.get("sensitive")
             ]
-            browser_state["requires_user_login"] = bool(login_fields)
+            page_identity = f"{page.url} {page.title()}".lower()
+            login_page = bool(re.search(r"/login|登录|sign[ -]?in|log[ -]?in", page_identity, re.I))
+            browser_state["requires_user_login"] = bool(login_fields) or login_page
             submit_buttons = page.locator(
                 "button, input[type='submit'], input[type='image']"
             ).evaluate_all(
@@ -252,7 +263,7 @@ def make_browser_tools(
                 "ok": True, "url": page.url, "title": page.title(),
                 "fields": fields[:100], "truncated": len(fields) > 100,
                 "submit_buttons": submit_buttons[:20],
-                "requires_user_login": bool(login_fields),
+                "requires_user_login": bool(login_fields) or login_page,
                 "login_fields": login_fields,
                 "message": (
                     "检测到账号或密码字段。请在当前浏览器窗口手动完成登录，"
