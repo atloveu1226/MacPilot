@@ -45,7 +45,12 @@ def make_browser_tools(
     allowlist: DomainAllowlist | None = None,
 ) -> list[StructuredTool]:
     runtime_allowlist = allowlist or DomainAllowlist.from_domains(settings.allowed_browser_domains)
-    browser_state: dict[str, Any] = {"context": None, "page": None, "fields": {}}
+    browser_state: dict[str, Any] = {
+        "context": None,
+        "page": None,
+        "fields": {},
+        "requires_user_login": False,
+    }
     browser_executor = ThreadPoolExecutor(
         max_workers=1,
         thread_name_prefix=f"macpilot-browser-{task_id or 'ad-hoc'}",
@@ -156,6 +161,7 @@ def make_browser_tools(
             playwright = browser_state.pop("playwright", None)
             browser_state["page"] = None
             browser_state["fields"] = {}
+            browser_state["requires_user_login"] = False
             try:
                 if context is not None:
                     context.close()
@@ -178,6 +184,12 @@ def make_browser_tools(
                 "ok": False, "error": str(error), "policy_denied": True,
             })
         def open_impl() -> dict[str, Any]:
+            if browser_state.get("requires_user_login"):
+                return {
+                    "ok": False,
+                    "requires_user_login": True,
+                    "message": "当前页面需要用户登录；已停止重复导航，请在浏览器中完成登录后再继续。",
+                }
             context = browser_state.get("context")
             if context is None:
                 context = _launch_context()
@@ -225,6 +237,7 @@ def make_browser_tools(
                 {key: item["key"], label: item.get("label") or item.get("name") or item.get("id") or item["key"], type: item.get("type")}
                 for item in fields if item.get("sensitive")
             ]
+            browser_state["requires_user_login"] = bool(login_fields)
             submit_buttons = page.locator(
                 "button, input[type='submit'], input[type='image']"
             ).evaluate_all(
