@@ -34,6 +34,12 @@ Resume Form Filler
 `Form Filler` 负责浏览器交互。两者都只使用上一阶段的 `ResumeProfile`，不能自行补造内容，
 也不会点击最终提交按钮。
 
+## 量化评测
+
+当前离线评测包含 50 个固定任务，最近一次结果为 50/50 通过，高风险动作拦截率 100%，
+Prompt Injection 检测率 100%，未授权动作数为 0。真实简历评测的字段级准确率、条目数量准确率、
+Token 消耗和表单回填成功率记录方式见 [docs/evaluation.md](docs/evaluation.md)。
+
 ## 项目结构
 
 ```text
