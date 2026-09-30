@@ -206,18 +206,25 @@ def make_browser_tools(
                     const label = el.labels && el.labels.length
                       ? Array.from(el.labels).map(x => x.innerText).join(' ').trim() : '';
                     const type = (el.getAttribute('type') || el.tagName).toLowerCase();
+                    const identity = [el.getAttribute('name') || '', el.id || '', label,
+                      el.getAttribute('placeholder') || ''].join(' ').toLowerCase();
+                    const sensitive = type === 'password' || /(password|passwd|pwd|username|user|account|login|账号|密码|用户名|登录)/i.test(identity);
                     const key = `field_${index}`;
                     return {
                       key, index, tag: el.tagName.toLowerCase(), type,
                       name: el.getAttribute('name') || '', id: el.id || '',
                       label, placeholder: el.getAttribute('placeholder') || '',
-                      required: !!el.required, value: el.value || '',
+                      required: !!el.required, value: el.value || '', sensitive,
                       options: el.tagName.toLowerCase() === 'select'
                         ? Array.from(el.options).map(x => ({value: x.value, label: x.text})) : []
                     };
                 })"""
             )
             browser_state["fields"] = {item["key"]: item for item in fields}
+            login_fields = [
+                {key: item["key"], label: item.get("label") or item.get("name") or item.get("id") or item["key"], type: item.get("type")}
+                for item in fields if item.get("sensitive")
+            ]
             submit_buttons = page.locator(
                 "button, input[type='submit'], input[type='image']"
             ).evaluate_all(
@@ -232,6 +239,13 @@ def make_browser_tools(
                 "ok": True, "url": page.url, "title": page.title(),
                 "fields": fields[:100], "truncated": len(fields) > 100,
                 "submit_buttons": submit_buttons[:20],
+                "requires_user_login": bool(login_fields),
+                "login_fields": login_fields,
+                "message": (
+                    "检测到账号或密码字段。请在当前浏览器窗口手动完成登录，"
+                    "Agent 不会读取或填写账号密码。登录完成后再继续填写简历表单。"
+                    if login_fields else "未检测到登录凭据字段。"
+                ),
             }
 
         try:
@@ -307,6 +321,13 @@ def make_browser_tools(
                 if field is None:
                     return {
                         "ok": False, "error": f"Unknown field key: {key}",
+                    }
+                if field.get("sensitive"):
+                    return {
+                        "ok": False,
+                        "error": "账号、用户名和密码字段必须由用户手动填写，Agent 不会写入敏感凭据。",
+                        "policy_denied": True,
+                        "field": key,
                     }
                 locator = page.locator("input, textarea, select").nth(int(field["index"]))
                 field_type = field["type"]
